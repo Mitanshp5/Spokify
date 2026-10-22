@@ -73,7 +73,10 @@ def prepare(args):
     manifest = dict(schemaVersion=1, applicationId=app_id, versionCode=int(code), versionName=version,
                     minSdk=int(minimum.group(1)), sizeBytes=target.stat().st_size, sha256=digest)
     (folder / 'spokify-update.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
-    shutil.copyfile(args.notes, folder / 'RELEASE_NOTES.md')
+    if args.notes:
+        shutil.copyfile(args.notes, folder / 'RELEASE_NOTES.md')
+    else:
+        (folder / 'RELEASE_NOTES.md').write_text(f'Spokify {version}\n\nUpdate Spokify from the App updates screen.\n', encoding='utf-8')
     print(json.dumps(dict(directory=str(folder), repository=REPOSITORY, tag='v' + version,
                          sha256=digest, signing_certificate_sha256=SIGNER, bytes=manifest['sizeBytes']), indent=2))
 
@@ -88,15 +91,26 @@ def publish(args):
     assert re.fullmatch(r'v\d+\.\d+\.\d+', tag)
     repository = json.loads(run('gh', 'repo', 'view', REPOSITORY, '--json', 'isPrivate,isEmpty').stdout)
     assert not repository['isPrivate'] and not repository['isEmpty'], 'Push the clean source to the public repository first.'
-    assert run('gh', 'release', 'view', tag, '--repo', REPOSITORY, check=False).returncode != 0, 'This release exists; publish a higher version instead.'
-    run('gh', 'release', 'create', tag, apk, folder / 'spokify-update.json', '--repo', REPOSITORY,
-        '--target', 'main', '--title', 'Spokify ' + manifest['versionName'], '--notes-file', folder / 'RELEASE_NOTES.md', '--draft')
-    release = json.loads(run('gh', 'api', f'repos/{REPOSITORY}/releases/tags/{tag}').stdout)
+    releases = json.loads(run('gh', 'api', f'repos/{REPOSITORY}/releases?per_page=100').stdout)
+    matches = [release for release in releases if release['tag_name'] == tag]
+    assert len(matches) <= 1, 'More than one matching release exists; inspect it first.'
+    if matches:
+        assert matches[0]['draft'], 'This release is already published; use a higher version instead.'
+        release = matches[0]
+    else:
+        run('gh', 'release', 'create', tag, apk, folder / 'spokify-update.json', '--repo', REPOSITORY,
+            '--target', 'main', '--title', 'Spokify ' + manifest['versionName'], '--notes-file', folder / 'RELEASE_NOTES.md', '--draft')
+        # Drafts do not have a Git tag yet. Resolve their ID through the authenticated
+        # release list instead of the published-release-by-tag endpoint.
+        releases = json.loads(run('gh', 'api', f'repos/{REPOSITORY}/releases?per_page=100').stdout)
+        release = next(item for item in releases if item['tag_name'] == tag and item['draft'])
     assets = {asset['name']: asset for asset in release['assets']}
     for name in ('spokify.apk', 'spokify-update.json'):
         local = folder / name
         assert assets[name]['size'] == local.stat().st_size and assets[name]['digest'] == 'sha256:' + sha(local), 'Uploaded asset verification failed; release remains a draft.'
-    run('gh', 'release', 'edit', tag, '--repo', REPOSITORY, '--draft=false', '--latest')
+    request = folder / 'publish-request.json'
+    request.write_text(json.dumps(dict(draft=False, make_latest='true', target_commitish='main')), encoding='utf-8')
+    run('gh', 'api', '--method', 'PATCH', f'repos/{REPOSITORY}/releases/{release["id"]}', '--input', request)
     print(f'https://github.com/{REPOSITORY}/releases/tag/{tag}')
 
 
@@ -105,7 +119,7 @@ if __name__ == '__main__':
     actions = parser.add_subparsers(dest='action', required=True)
     command = actions.add_parser('prepare')
     command.add_argument('--apk', type=Path, default=ROOT / 'android/app/build/outputs/apk/performance/app-performance.apk')
-    command.add_argument('--notes', type=Path, default=ROOT / 'CHANGELOG.md')
+    command.add_argument('--notes', type=Path, help='Optional local release notes; no tracked changelog is required.')
     command.add_argument('--sdk')
     command.add_argument('--java')
     command = actions.add_parser('publish')

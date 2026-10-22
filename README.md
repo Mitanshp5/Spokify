@@ -43,7 +43,7 @@ SDK state, device data and local diagnostics are excluded from Git.
 
 1. Increase `spokify.versionCode` and `spokify.versionName` in
    `android/gradle.properties`; every APK release needs a higher version code.
-2. Update `CHANGELOG.md`, run the tests, and build the performance APK.
+2. Run the tests and build the performance APK.
 3. Commit and push the reviewed source to `main`.
 4. Prepare and publish the release using Python 3.10+, the Android SDK, Java and
    an authenticated GitHub CLI:
@@ -59,5 +59,7 @@ both to a draft release, verifies GitHub's uploaded SHA-256 digests, then makes
 the release available. Existing releases are never overwritten. In the app,
 downloads must match the manifest checksum, package, newer version and installed
 signing key before Android's installer opens. Partial downloads can be retried.
+Release notes are optional: pass `--notes path/to/local-notes.md` when preparing
+the package. Local notes and changelogs do not need to be committed.
 
 See [the license](android/LICENSE) and [third-party notices](android/THIRD_PARTY_NOTICES.md).
