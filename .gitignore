@@ -1,0 +1,33 @@
+# Local Android/Gradle state; keep application source and fixtures trackable.
+**/.gradle/
+**/.kotlin/
+**/.idea/
+**/__pycache__/
+**/build/
+**/local.properties
+*.pyc
+*.apk
+*.aab
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example
+
+# Private diagnostics, agent configuration, reference binaries and research captures.
+/android/.work/
+/android/opencode.json
+/reference/
+/research/
+
+# Local agent helpers, SDK/emulator images, diagnostics and caches.
+/.tools/
+/checkpoints/
+/graphify-out/
+/CHECKPOINT.txt
+/PROGRESS.md
+/*_PLAN.md
+/*_AUDIT.md
+/*_HANDOFF.md
+/session-*.md
+/spotify_deep_research_ux_playbook_*.md

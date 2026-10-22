@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="sidea_background">#121212</color>
+    <color name="sidea_surface">#1C1C1C</color>
+    <color name="sidea_accent">#1ED760</color>
+    <color name="ic_launcher_background">#121212</color>
+</resources>

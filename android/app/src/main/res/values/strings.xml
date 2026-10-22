@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Spokify</string>
+    <string name="offline_download_channel">Downloads</string>
+    <string name="offline_download_active">Downloading</string>
+    <string name="offline_download_waiting">Waiting for a connection</string>
+</resources>
