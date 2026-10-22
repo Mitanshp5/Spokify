@@ -1,4 +1,10 @@
-# Spokify 0.2.0
+# Spokify 0.2.1
+
+- Keep install and manual update checks above release notes so they are easy to reach.
+- Check once on the first app open each day, remember available updates, and show
+  the yellow profile dot and Update Spokify menu entry.
+
+## Spokify 0.2.0
 
 - Update Spokify from Settings → App updates without connecting a USB cable.
 - Check for a new version on the first app open each day, with a yellow profile

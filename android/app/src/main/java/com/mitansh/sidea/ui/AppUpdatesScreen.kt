@@ -77,10 +77,6 @@ fun AppUpdatesScreen(updates: AppUpdateViewModel, onBack: () -> Unit) {
                 } else if (state.phase != UpdatePhase.READY) {
                     Button(onClick = updates::download, colors = ButtonDefaults.buttonColors(containerColor = SpokifyGreen, contentColor = Color.Black)) { Text("Download update") }
                 }
-                if (update.notes.isNotBlank()) {
-                    Text("What's new", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
-                    Text(update.notes, color = SpokifyMuted)
-                }
             }
             if (state.phase == UpdatePhase.READY) {
                 Button(enabled = !installBusy, onClick = {
@@ -94,6 +90,10 @@ fun AppUpdatesScreen(updates: AppUpdateViewModel, onBack: () -> Unit) {
             (state.error ?: installError)?.let { Text(it, color = SpokifyError, modifier = Modifier.padding(vertical = 12.dp)) }
             if (state.phase !in setOf(UpdatePhase.CHECKING, UpdatePhase.DOWNLOADING)) {
                 TextButton(onClick = { installError = null; updates.check() }) { Text("Check for updates") }
+            }
+            state.update?.notes?.takeIf { it.isNotBlank() }?.let { notes ->
+                Text("What's new", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
+                Text(notes, color = SpokifyMuted)
             }
             TextButton(onClick = {
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/${BuildConfig.UPDATES_REPOSITORY}/releases"))) }

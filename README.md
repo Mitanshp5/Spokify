@@ -50,7 +50,7 @@ SDK state, device data and local diagnostics are excluded from Git.
 
 ```sh
 python scripts/release.py prepare
-python scripts/release.py publish --directory android/.work/releases/v0.2.0
+python scripts/release.py publish --directory android/.work/releases/v0.2.1
 ```
 
 Use the new version's directory for later releases. Preparation verifies the APK
