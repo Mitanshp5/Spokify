@@ -1,6 +1,7 @@
 package com.mitansh.sidea.data.spotify
 
 import java.net.URI
+import java.math.BigDecimal
 import java.text.Normalizer
 import com.mitansh.sidea.core.Track
 import com.grack.nanojson.JsonParser
@@ -39,11 +40,17 @@ object SpotifyPlaylist {
             val uri = row["uri"] as? String
             SpotifySourceTrack(i, row["title"] as? String ?: "", row["subtitle"] as? String ?: "", (row["duration"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0, uri?.removePrefix("spotify:track:")?.takeIf(idPattern::matches))
         }
-        val declared = (entity["trackCount"] ?: entity["totalTracks"] ?: entity["total"] as? Number)?.toString()?.toIntOrNull()
+        val rawDeclared = entity["trackCount"] ?: entity["totalTracks"] ?: entity["total"]
+        val declared = rawDeclared?.let {
+            require(it is Number || it is String) { "Invalid Spotify playlist count" }
+            BigDecimal(it.toString()).intValueExact().also { count ->
+                require(count >= 0 && count >= list.size) { "Contradictory Spotify playlist count" }
+            }
+        }
         val completeness = when {
             list.size > MAX_TRACKS -> SpotifyCompleteness.PARTIAL
             declared == null -> SpotifyCompleteness.UNKNOWN
-            declared <= tracks.size -> SpotifyCompleteness.COMPLETE
+            declared == tracks.size -> SpotifyCompleteness.COMPLETE
             else -> SpotifyCompleteness.PARTIAL
         }
         return SpotifyPlaylistPreview("", entity["name"] as? String ?: entity["title"] as? String ?: "", tracks, completeness, declared,
@@ -88,11 +95,9 @@ suspend fun matchSpotifyPlaylist(
             .map { it to scoreSpotifyCandidate(source, it) }.sortedByDescending { it.second }
         val first = candidates.firstOrNull()
         val runnerUp = candidates.drop(1).firstOrNull()
-        // Two things make a row uncertain: a close runner-up, and a candidate whose artist credits
-        // differ from the source while the title is the same. The second case is a genuine
-        // ambiguity that the metadata alone cannot settle, so the row is sent for review rather
-        // than accepted or dropped.
-        val ambiguous = candidates.any { isAmbiguousCredit(source, it.first) }
+        // Only plausible recordings can create credit ambiguity. A distant-duration result must
+        // not veto stronger evidence, but unexplained extra performers still require review.
+        val ambiguous = candidates.any { it.second >= REVIEW_FLOOR && isAmbiguousCredit(source, it.first) }
         val closeAlternative = first != null && runnerUp != null && first.second - runnerUp.second < 0.10
         val status = when {
             ambiguous -> if (first != null && first.second >= REVIEW_FLOOR) SpotifyMatchStatus.REVIEW
@@ -112,29 +117,60 @@ suspend fun matchSpotifyPlaylist(
 /**
  * Whether a candidate with the same title but different artist credits is genuinely ambiguous.
  *
- * "Get Lucky" by "Daft Punk" and "Get Lucky" by "Daft Punk & Pharrell Williams" can be the same
- * recording or a different one; the metadata alone cannot tell, so such a row goes for review. A
- * completely different artist is not ambiguous, it is a different song, and stays unmatched.
+ * Dropped credits are common in the song catalog; added credits are not explained by that
+ * convention. Only shared whole names (not shared surname tokens) can create ambiguity.
  */
 private fun isAmbiguousCredit(source: SpotifySourceTrack, candidate: Track): Boolean {
-    val title = normalizeWords(source.title)
-    if (title.isEmpty() || normalizeWords(candidate.title) != title) return false
-    val sourceArtists = artistTokens(source.artist)
-    val candidateArtists = artistTokens(candidate.artist)
+    val title = recordingTitle(source.title)
+    if (title.isEmpty() || recordingTitle(candidate.title) != title) return false
+    val sourceArtists = recordingArtists(source.artist, source.title)
+    val candidateArtists = recordingArtists(candidate.artist, candidate.title)
     if (sourceArtists.isEmpty() || candidateArtists.isEmpty()) return false
-    if (sourceArtists == candidateArtists) return false
-    // Unrelated artists are a different song; only shared credits make a row ambiguous.
-    return sourceArtists.intersect(candidateArtists).isNotEmpty()
+    if (sourceArtists.containsAll(candidateArtists)) return false
+    return sourceArtists.intersect(artistTokens(candidate.artist)).isNotEmpty()
 }
 
-private fun artistTokens(value: String): Set<String> =
-    normalizeWords(value).split(' ').filter { it.isNotEmpty() }.toSet()
+private val featureLabel = Regex("(?i)[\\[(]\\s*(?:feat\\.?|featuring|with)\\s+([^\\])]+)[\\])]")
 
-private fun normalizeWords(value: String): String = value
-    .lowercase()
-    .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+private fun recordingArtists(artist: String, title: String): Set<String> =
+    artistTokens(artist) + featureLabel.findAll(title).flatMap { artistTokens(it.groupValues[1]) }.toSet()
+
+private fun artistTokens(value: String): Set<String> =
+    value.split(Regex(",|&|;|(?i)\\bfeat\\.?\\s|\\s+and\\s+"))
+        .map(::normalizeWords).filter { it.isNotEmpty() }.toSet()
+
+private fun normalizeWords(value: String): String = Normalizer.normalize(value.lowercase(java.util.Locale.ROOT), Normalizer.Form.NFD)
+    // Latin accents are presentation differences; Indic vowel signs are part of the word.
+    .replace(Regex("(?<=\\p{IsLatin})\\p{M}+"), "")
+    .replace(Regex("[^\\p{L}\\p{M}\\p{N}]+"), " ")
     .trim()
     .replace(Regex("\\s+"), " ")
+
+/** Remove only identified presentation metadata, never arbitrary parenthesized version names. */
+private fun recordingTitle(value: String): String = normalizeWords(value
+    .replace(featureLabel, " ")
+    .replace(Regex("(?i)[\\[(]\\s*(?:from\\s+|movie\\s*:\\s*)([^\\])]+)[\\])]")) { " ${filmSuffix(it.groupValues[1])} " }
+    .replace(Regex("(?i)\\s+-\\s+(?:from\\s+|movie\\s*:\\s*)(.+)$")) { " ${filmSuffix(it.groupValues[1])} " }
+    .replace(Regex("(?i)\\s*[\\[(]\\s*(?:official\\s+)?(?:lyric(?:s)?(?:\\s+video)?|audio|music\\s+video|video)\\s*[\\])]"), " ")
+    .replace(Regex("(?i)\\s*[-|]\\s*(?:official\\s+)?(?:lyric(?:s)?(?:\\s+video)?|audio|music\\s+video|video)\\s*$"), " "))
+
+/** A quoted film ends at its closing quote, NOT at the end of the metadata bracket. */
+private fun filmSuffix(value: String): String {
+    val text = value.trim()
+    val closingQuote = when (text.firstOrNull()) {
+        '"' -> '"'
+        '\'' -> '\''
+        '“' -> '”'
+        else -> null
+    }
+    if (closingQuote != null) {
+        val end = text.indexOf(closingQuote, 1)
+        return if (end >= 0) text.substring(end + 1) else text
+    }
+    // Unquoted Movie:/From labels also occur. Retain explicit language/version evidence.
+    val marker = Regex("(?i)\\b(?:hindi|tamil|telugu|gujarati|malayalam|kannada|bengali|punjabi|marathi|english|version|live|remix|acoustic|instrumental|karaoke|cover|edit|remaster|reprise|unplugged|slowed|sped|lofi)\\b").find(text)
+    return marker?.let { text.substring(it.range.first) } ?: ""
+}
 
 /**
  * The score an ambiguous row must still reach to be worth showing for review.
@@ -153,25 +189,26 @@ private const val REVIEW_FLOOR = 0.6
  * alone is not enough to accept a match.
  */
 private fun scoreSpotifyCandidate(source: SpotifySourceTrack, candidate: Track): Double {
-    fun norm(s: String) = Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD)
-        .replace(Regex("\\p{M}+"), "").replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
-    val versions = listOf("live", "remix", "cover", "acoustic", "instrumental", "edit", "karaoke", "remaster")
-    fun versionSet(s: String) = versions.filter { Regex("\\b${Regex.escape(it)}\\b", RegexOption.IGNORE_CASE).containsMatchIn(s) }.toSet()
-    val title = norm(source.title)
-    val candidateTitle = norm(candidate.title)
-    val artist = norm(source.artist)
-    val candidateArtist = norm(candidate.artist)
+    val versions = listOf("live", "remix", "cover", "acoustic", "instrumental", "edit", "karaoke", "remaster",
+        "reprise", "sped up", "slowed", "reverb", "lofi", "lo fi", "unplugged")
+    fun versionSet(s: String) = versions.filter { Regex("\\b${Regex.escape(it)}\\b").containsMatchIn(recordingTitle(s)) }.toSet()
+    val title = recordingTitle(source.title)
+    val candidateTitle = recordingTitle(candidate.title)
+    val artist = normalizeWords(source.artist)
+    val sourceArtists = recordingArtists(source.artist, source.title)
+    val candidateArtists = recordingArtists(candidate.artist, candidate.title)
     val versionMismatch = versionSet(source.title) != versionSet(candidate.title)
+    if (versionMismatch) return 0.0
+    if (source.durationMs > 0 && candidate.durationMs > 0 &&
+        kotlin.math.abs(source.durationMs - candidate.durationMs) > 30_000L) return 0.0
     val titleScore = when {
         title == candidateTitle && title.isNotEmpty() -> 1.0
-        title.isNotEmpty() && candidateTitle.isNotEmpty() &&
-            (candidateTitle.contains(title) || title.contains(candidateTitle)) -> 0.7
         else -> 0.0
     }
-    // A partial artist name is weak evidence; it only helps when the title already agrees.
+    // Whole-name credit subsets explain primary-performer catalog metadata, not name fragments.
     val artistScore = when {
         artist.isEmpty() -> 0.3
-        artist == candidateArtist -> 1.0
+        candidateArtists.isNotEmpty() && sourceArtists.containsAll(candidateArtists) -> 1.0
         else -> 0.0
     }
     val durationScore = when {
@@ -187,5 +224,5 @@ private fun scoreSpotifyCandidate(source: SpotifySourceTrack, candidate: Track):
         }
     }
     val score = titleScore * 0.45 + artistScore * 0.35 + durationScore * 0.20
-    return if (versionMismatch) (score - 0.35).coerceAtLeast(0.0) else score
+    return if (source.durationMs <= 0 || candidate.durationMs <= 0) score.coerceAtMost(0.82) else score
 }

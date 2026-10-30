@@ -12,7 +12,11 @@ import okhttp3.Request
 enum class SpotifyFailure { INVALID_INPUT, NETWORK, RATE_LIMITED, NOT_AVAILABLE, PROVIDER_CHANGED, TOO_LARGE }
 class SpotifyImportException(val kind: SpotifyFailure, message: String, cause: Throwable? = null) : IOException(message, cause)
 data class SpotifyApiPage(val body: String)
-fun interface SpotifyApiTransport { suspend fun get(url: String): SpotifyApiPage }
+fun interface SpotifyApiTransport {
+    suspend fun get(url: String): SpotifyApiPage
+    suspend fun playlistPage(id: String, offset: Int, anonymousToken: String): SpotifyApiPage =
+        get(SpotifyPublicPages.url(id, offset))
+}
 
 class SpotifyRepository(private val transport: SpotifyApiTransport = PublicSpotifyTransport()) {
     suspend fun publicPlaylist(input: String): SpotifyPlaylistPreview {
@@ -21,9 +25,45 @@ class SpotifyRepository(private val transport: SpotifyApiTransport = PublicSpoti
         catch (e: CancellationException) { throw e }
         catch (e: SpotifyImportException) { throw e }
         catch (e: Exception) { throw SpotifyImportException(SpotifyFailure.NETWORK, "Spotify request failed", e) }
-        return try { SpotifyPlaylist.parseEmbed(html).copy(id = id) }
+        val preview = try { SpotifyPlaylist.parseEmbed(html).copy(id = id) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { throw SpotifyImportException(SpotifyFailure.PROVIDER_CHANGED, "Spotify embed could not be parsed", e) }
+        val token = SpotifyPublicPages.anonymousToken(html)
+            ?: return preview.copy(warning = preview.warning ?: "Only Spotify's public preview could be read; the playlist may contain more songs.")
+        val tracks = mutableListOf<SpotifySourceTrack>()
+        var title = preview.title
+        var total: Int? = null
+        var offset = 0
+        try {
+            while (true) {
+                val page = SpotifyPublicPages.parse(transport.playlistPage(id, offset, token).body, id, offset)
+                require(total == null || total == page.total) { "Spotify playlist changed while reading. Read it again." }
+                total = page.total
+                if (offset == 0 && page.tracks.isEmpty() && page.total > 0) {
+                    return preview.copy(completeness = SpotifyCompleteness.PARTIAL, declaredCount = page.total,
+                        warning = "Only Spotify's public preview (${preview.tracks.size} songs) could be read. Spotify returned no rows for ${page.total} songs; try again later.")
+                }
+                title = page.title.ifBlank { title }
+                tracks += page.tracks.take(SpotifyPublicPages.MAX_TRACKS - tracks.size)
+                if (page.next == null) {
+                    val complete = tracks.size == total
+                    return SpotifyPlaylistPreview(id, title, tracks, if (complete) SpotifyCompleteness.COMPLETE else SpotifyCompleteness.PARTIAL,
+                        total, if (complete) null else "Read ${tracks.size} of $total songs. Spotify did not return the remaining rows; read the playlist again.")
+                }
+                require(page.tracks.isNotEmpty() && page.next == offset + page.tracks.size && page.next > offset) { "Spotify returned a non-advancing playlist page" }
+                if (tracks.size >= SpotifyPublicPages.MAX_TRACKS) {
+                    return SpotifyPlaylistPreview(id, title, tracks, SpotifyCompleteness.PARTIAL, total,
+                        "Read ${tracks.size} of $total songs. The import safety limit is ${SpotifyPublicPages.MAX_TRACKS} songs.")
+                }
+                offset = page.next
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) {
+            if (total == null) return preview.copy(completeness = SpotifyCompleteness.UNKNOWN,
+                warning = "Only Spotify's public preview (${preview.tracks.size} songs) could be read. Full playlist reading is temporarily unavailable; try again later.")
+            return SpotifyPlaylistPreview(id, title, tracks, SpotifyCompleteness.PARTIAL, total,
+                "Read ${tracks.size} of $total songs. The remaining pages could not be read; try again later.")
+        }
     }
 
     private fun playlistId(input: String): String = SpotifyPlaylist.parseId(input)
@@ -34,11 +74,18 @@ class SpotifyRepository(private val transport: SpotifyApiTransport = PublicSpoti
 private class PublicSpotifyTransport : SpotifyApiTransport {
     private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS).callTimeout(25, TimeUnit.SECONDS).build()
-    override suspend fun get(url: String): SpotifyApiPage = withContext(Dispatchers.IO) {
+    override suspend fun get(url: String): SpotifyApiPage {
         val parsed = runCatching { URI(url) }.getOrNull()
         if (parsed?.scheme != "https" || parsed.host != "open.spotify.com" || parsed.userInfo != null || parsed.port !in listOf(-1, 443) || !Regex("/embed/playlist/[A-Za-z0-9]{22}").matches(parsed.path)) throw SpotifyImportException(SpotifyFailure.INVALID_INPUT, "Spotify URL not allowed")
-        val request = Request.Builder().url(url).header("Accept", "text/html")
-            .build()
+        return fetch(url, null)
+    }
+
+    override suspend fun playlistPage(id: String, offset: Int, anonymousToken: String): SpotifyApiPage =
+        fetch(SpotifyPublicPages.url(id, offset), anonymousToken)
+
+    private suspend fun fetch(url: String, anonymousToken: String?): SpotifyApiPage = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url).header("Accept", if (anonymousToken == null) "text/html" else "application/json")
+            .apply { if (anonymousToken != null) header("Authorization", "Bearer $anonymousToken") }.build()
         try {
             client.newCall(request).execute().use { response ->
                 when (response.code) {
