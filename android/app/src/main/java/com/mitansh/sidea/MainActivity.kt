@@ -298,11 +298,6 @@ private fun SpokifyApp(
     val radioPreferences = remember { com.mitansh.sidea.data.radio.RadioPreferences.of(context) }
     var autoplayEnabled by remember { mutableStateOf(radioPreferences.autoplayEnabled) }
     var hiddenCount by remember { mutableStateOf(radioPreferences.hiddenTracks().size) }
-    var importLoading by remember { mutableStateOf(false) }
-    var importProgress by remember { mutableStateOf<String?>(null) }
-    var importSession by remember { mutableStateOf<com.mitansh.sidea.data.imports.ImportSessionStore.Session?>(null) }
-    var importError by remember { mutableStateOf<String?>(null) }
-    var importSaved by remember { mutableStateOf<String?>(null) }
     var importJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val importCoordinator = remember {
         com.mitansh.sidea.data.imports.ImportCoordinator(
@@ -319,60 +314,34 @@ private fun SpokifyApp(
         hiddenCount = radioPreferences.hiddenTracks().size
     }
 
-    /** Reads a playlist from a link and matches each row to a playable recording. */
-    suspend fun runImport(link: String) {
-        if (importLoading) return
-        importLoading = true
-        importSession = null
-        importError = null
-        importSaved = null
-        importProgress = "Reading the playlist…"
-        try {
-            val result = importCoordinator.read(link) { message ->
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { importProgress = message }
-            }
-            importSession = result.session.takeIf { it.items.isNotEmpty() }
-            importError = result.error ?: "No songs were available in this playlist.".takeIf { result.session.items.isEmpty() }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            importError = "The playlist could not be read. Please try again."
-        } finally {
-            importLoading = false
-            importProgress = null
-        }
+    val importDraft = remember(importCoordinator) { com.mitansh.sidea.ui.ImportReviewDraftState(importCoordinator) }
+    LaunchedEffect(section) {
+        if (section == "import") importDraft.refreshPending()
+        else { importDraft.cancelReading(); importJob?.cancel(); importJob = null }
     }
 
-    /** Saves the reviewed import. Committing twice updates the same playlist. */
-    suspend fun saveImport(selections: Map<Int, Track>) {
-        if (importLoading) return
-        val session = importSession ?: return
-        importLoading = true
-        importError = null
-        try {
-            val result = importCoordinator.commit(session.id, selections)
-            if (result.error != null) {
-                importError = result.error
-            } else {
-                importSaved = if (result.alreadyCommitted) {
-                    "Already saved as a playlist."
-                } else {
-                    "Saved ${result.saved} songs" + if (result.unmatched > 0) " · ${result.unmatched} need a check" else ""
-                }
-                importSession = null
-                section = null
-                tab = SpokifyTab.LIBRARY
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            importError = "The playlist could not be saved. Please try again."
-        } finally {
-            importLoading = false
+    /** Feedback belongs to the destination, not to the review screen that just unmounted. */
+    suspend fun saveImport() {
+        importDraft.save { result ->
+            com.mitansh.sidea.ui.showImportSaveFeedback(
+                result = result,
+                onLibrary = { sectionParent = null; section = null; tab = SpokifyTab.LIBRARY },
+                showMessage = { message, action ->
+                    snackbar.currentSnackbarData?.dismiss()
+                    snackbar.showSnackbar(message, actionLabel = action, duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed
+                },
+                onOpenPlaylist = { playlistId ->
+                    selectedPlaylist = playlistId
+                    sectionParent = null
+                    tab = SpokifyTab.LIBRARY
+                    section = "playlist"
+                },
+            )
         }
     }
 
     fun leaveImport() {
+        importDraft.cancelReading()
         importJob?.cancel()
         importJob = null
         backSection()
@@ -597,14 +566,21 @@ private fun SpokifyApp(
                         onBack = ::backSection,
                     )
                     "import" -> ImportScreen(
-                        loading = importLoading,
-                        progress = importProgress,
-                        session = importSession,
-                        error = importError,
-                        savedMessage = importSaved,
-                        onFetch = { link -> if (!importLoading) importJob = scope.launch { runImport(link) } },
-                        onSave = { selections -> scope.launch { saveImport(selections) } },
-                        onCancel = { leaveImport(); importSession = null; importError = null },
+                        loading = importDraft.loading,
+                        progress = importDraft.progress,
+                        session = importDraft.session,
+                        error = importDraft.error,
+                        choiceMessage = importDraft.choiceMessage,
+                        choosing = importDraft.choosing,
+                        pendingSessions = importDraft.pending,
+                        onResume = { id -> scope.launch { importDraft.resume(id) } },
+                        onChoose = { position, track -> scope.launch { importDraft.choose(position, track) } },
+                        onNewLink = { importDraft.newLink() },
+                        onFetch = { link ->
+                            if (!importDraft.loading && importJob?.isActive != true) importJob = scope.launch { importDraft.read(link) }
+                        },
+                        onSave = { scope.launch { saveImport() } },
+                        onCancel = { leaveImport() },
                         onBack = { leaveImport() },
                     )
 

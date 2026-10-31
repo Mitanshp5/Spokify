@@ -6,6 +6,9 @@ import com.grack.nanojson.JsonArray
 import com.grack.nanojson.JsonObject
 import com.grack.nanojson.JsonParser
 import java.io.File
+import java.io.FileOutputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * A durable import session.
@@ -84,19 +87,40 @@ class ImportSessionStore(private val folder: File) {
         }
         root.put("items", items)
         // The object's own toString is a debug format, not JSON, so the writer is used instead.
-        file(session.id).writeText(com.grack.nanojson.JsonWriter.string(root))
+        val target = file(session.id)
+        val staging = File(folder, target.name + ".tmp")
+        try {
+            FileOutputStream(staging).use { output ->
+                output.write(com.grack.nanojson.JsonWriter.string(root).toByteArray(Charsets.UTF_8))
+                output.fd.sync()
+            }
+            try {
+                Files.move(staging.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                Files.move(staging.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            // Never delete a directory or the previously acknowledged target on failure.
+            if (staging.isFile) staging.delete()
+        }
         prune()
     }
 
     fun load(id: String): Session? {
+        if (!validId(id)) return null
         val file = file(id)
         if (!file.isFile) return null
         return runCatching {
             val root = JsonParser.`object`().from(file.readText())
-            val items = root.getArray("items")?.mapNotNull { element ->
-                val entry = element as? JsonObject ?: return@mapNotNull null
+            require(root.getString("id") == id && root.getString("sourceId")?.isNotBlank() == true)
+            require(root.getString("source") in ImportedPlaylist.Source.entries.map { it.name })
+            val items = requireNotNull(root.getArray("items")).map { element ->
+                val entry = requireNotNull(element as? JsonObject)
+                val position = (entry["position"] as? Number)?.toLong()
+                require(position != null && position in 0..Int.MAX_VALUE.toLong() &&
+                    (entry["position"] as Number).toDouble() == position.toDouble())
                 ImportedItem(
-                    position = entry.getInt("position") ?: 0,
+                    position = position.toInt(),
                     sourceTrackId = entry.getString("sourceTrackId"),
                     title = entry.getString("title").orEmpty(),
                     artist = entry.getString("artist").orEmpty(),
@@ -110,7 +134,8 @@ class ImportSessionStore(private val folder: File) {
                         ImportedItem.Status.valueOf(entry.getString("status").orEmpty())
                     }.getOrDefault(ImportedItem.Status.MISSING),
                 )
-            } ?: emptyList()
+            }
+            require(items.map { it.position }.distinct().size == items.size)
             Session(
                 id = root.getString("id").orEmpty(),
                 source = runCatching {
@@ -134,7 +159,8 @@ class ImportSessionStore(private val folder: File) {
     fun pending(): List<Session> = folder.listFiles()
         ?.filter { it.isFile && it.name.endsWith(SUFFIX) }
         ?.mapNotNull { load(it.name.removeSuffix(SUFFIX)) }
-        ?.filter { it.committedPlaylistId == null }
+        ?.filter { it.committedPlaylistId == null && it.items.isNotEmpty() &&
+            it.items.all { row -> row.position >= 0 } && it.items.map { row -> row.position }.distinct().size == it.items.size }
         ?.sortedByDescending { it.updatedAtEpochMs }
         ?: emptyList()
 
@@ -146,10 +172,14 @@ class ImportSessionStore(private val folder: File) {
         folder.mkdirs()
     }
 
-    private fun file(id: String) = File(folder, id + SUFFIX)
+    private fun validId(id: String) = id.matches(Regex("[A-Za-z0-9_-]{1,128}"))
+    private fun file(id: String): File {
+        require(validId(id)) { "Invalid import session identifier" }
+        return File(folder, id + SUFFIX)
+    }
     /** Keeps the number of stored sessions small, so the folder cannot grow without limit. */
     private fun prune() {
-        val files = folder.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }
+        val files = folder.listFiles()?.filter { it.isFile && it.name.endsWith(SUFFIX) }?.sortedByDescending { it.lastModified() }
             ?: return
         files.drop(MAX_SESSIONS).forEach { it.delete() }
     }

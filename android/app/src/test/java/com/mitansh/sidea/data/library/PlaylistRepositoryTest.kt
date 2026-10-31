@@ -19,6 +19,30 @@ class PlaylistRepositoryTest {
         assertEquals(listOf("youtube:x", "youtube:x", "youtube:x"), repository.observeEntries(id).first().map { it.track.uid })
     }
 
+    @Test fun importRetryRebuildsOnlyItsStableDestinationInOrder() = runBlocking {
+        val repository = PlaylistRepository(MemoryPlaylistDao())
+        val a = Track("a", "First", "Artist")
+        val b = Track("b", "Second", "Artist")
+        val independent = repository.create("mix", listOf(b, b))
+        repository.rename(independent, "User edited")
+        repository.append(independent, a)
+        val independentBefore = repository.observeEntries(independent).first()
+        val id = repository.saveImport("session-one", "mix", listOf(a, b, a))
+        repository.rename(id, "Retained destination name")
+        val metadata = repository.observePlaylists().first().single { it.id == id }
+        val retry = repository.saveImport("session-one", "mix", listOf(b, a, b))
+        assertEquals(id, retry)
+        assertEquals(2, repository.observePlaylists().first().size)
+        assertEquals(listOf(b, a, b), repository.observeEntries(id).first().map { it.track })
+        assertEquals(listOf(0, 1, 2), repository.observeEntries(id).first().map { it.position })
+        assertEquals(metadata, repository.observePlaylists().first().single { it.id == id })
+        assertEquals(independentBefore, repository.observeEntries(independent).first())
+        val distinct = repository.saveImport("session-two", "mix", listOf(a, b, a))
+        assertEquals(3, repository.observePlaylists().first().size)
+        assertEquals(false, id == distinct)
+        assertEquals(listOf(a, b, a), repository.observeEntries(distinct).first().map { it.track })
+    }
+
     @Test fun renameRemoveMoveAndDeleteAreScoped() = runBlocking {
         val dao = MemoryPlaylistDao()
         val repository = PlaylistRepository(dao)

@@ -8,6 +8,9 @@ import com.mitansh.sidea.data.library.PlaylistRepository
 import com.mitansh.sidea.data.spotify.SpotifyRepository
 import com.mitansh.sidea.data.spotify.matchSpotifyPlaylist
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -54,6 +57,36 @@ class ImportCoordinator(
         val alreadyCommitted: Boolean,
         val error: String? = null,
     )
+
+    data class SelectionResult(val session: ImportSessionStore.Session?, val error: String? = null)
+
+    /** Acknowledges a choice only after writing it. Shares the commit lock: never merge stale UI rows. */
+    suspend fun updateSelection(sessionId: String, sourcePosition: Int, track: Track): SelectionResult =
+        withContext(Dispatchers.IO) {
+            commitMutex.withLock {
+                val stored = sessions.load(sessionId)
+                    ?: return@withLock SelectionResult(null, "The import is no longer available. Read the playlist again.")
+                if (stored.committedPlaylistId != null) {
+                    return@withLock SelectionResult(null, "This import is already saved.")
+                }
+                val row = stored.items.singleOrNull { it.position == sourcePosition }
+                val candidate = row?.let { (it.alternatives + listOfNotNull(it.selected))
+                    .firstOrNull { it.uid == track.uid && it.id.isNotBlank() && it.source.isNotBlank() } }
+                    ?: return@withLock SelectionResult(null, "That recording is not available for this song. Choose a listed recording.")
+                val updated = stored.copy(
+                    items = stored.items.map { if (it.position == sourcePosition) it.copy(selected = candidate, status = ImportedItem.Status.MATCHED) else it },
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                )
+                try {
+                    sessions.save(updated)
+                    SelectionResult(updated)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    SelectionResult(null, "The choice could not be saved. Free some storage and try choosing again.")
+                }
+            }
+        }
 
     /**
      * Reads a playlist from a link and matches it to playable songs.
@@ -112,6 +145,7 @@ class ImportCoordinator(
             items = items,
             updatedAtEpochMs = System.currentTimeMillis(),
         )
+        currentCoroutineContext().ensureActive()
         sessions.save(session)
         return ReadResult(session)
     }
@@ -155,6 +189,7 @@ class ImportCoordinator(
             warning = listOfNotNull(preview.warning, "${matched.failedSearches} song searches failed. Read the playlist again to retry them."
                 .takeIf { matched.failedSearches > 0 }).joinToString(" ").ifBlank { null },
         )
+        currentCoroutineContext().ensureActive()
         sessions.save(session)
         return ReadResult(session)
     }
@@ -162,8 +197,8 @@ class ImportCoordinator(
     /**
      * Saves the reviewed songs as a local playlist.
      *
-     * Committing the same session twice does not create a second playlist: the session remembers
-     * which playlist it produced, and the provenance rows are replaced rather than duplicated.
+     * A session has one stable destination even if the process stops before its completion is
+     * recorded. Retry rebuilds that destination and its provenance, not a same-name playlist.
      */
     suspend fun commit(sessionId: String, selections: Map<Int, Track> = emptyMap()): CommitResult = withContext(Dispatchers.IO) {
         commitMutex.withLock {
@@ -185,7 +220,13 @@ class ImportCoordinator(
             if (tracks.isEmpty()) {
                 return@withLock CommitResult(null, 0, session.items.size, false, "Choose at least one matching song before saving.")
             }
-            val playlistId = playlists.create(session.title.ifBlank { "Imported playlist" }, tracks)
+            // Once database writes start, finish or roll them back even if the screen leaves.
+            withContext(NonCancellable) {
+            var playlistId: String? = null
+            try {
+            // Freeze one-shot choices before any database writes so cold retry uses the same rows.
+            sessions.save(session)
+            playlistId = playlists.saveImport(session.id, session.title.ifBlank { "Imported playlist" }, tracks)
             provenance.deleteForPlaylist(playlistId)
             provenance.insertAll(
                 session.items.mapNotNull { item ->
@@ -207,6 +248,15 @@ class ImportCoordinator(
             sessions.save(committed)
             val unmatched = session.items.count { it.selected == null }
             CommitResult(playlistId, tracks.size, unmatched, false)
+            } catch (failure: Exception) {
+                val rollbackFailed = playlistId?.let { created ->
+                    runCatching { provenance.deleteForPlaylist(created); playlists.deletePlaylist(created) }.isFailure
+                } ?: false
+                CommitResult(null, 0, session.items.count { it.selected == null }, false,
+                    if (rollbackFailed) "Saving was interrupted. Check your Library before retrying; an incomplete playlist could not be removed."
+                    else "The playlist could not be saved. Free some storage and try again. Your review is kept.")
+            }
+            }
         }
     }
 

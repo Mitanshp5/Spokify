@@ -28,6 +28,14 @@ class PlaylistRepository(private val dao: PlaylistDao) {
         return id
     }
 
+    /** Reserved, injective session identity; independent/generic playlists keep their random IDs. */
+    suspend fun saveImport(sessionId: String, name: String, tracks: List<Track>): String {
+        require(sessionId.isNotBlank() && name.isNotBlank())
+        val id = "import:$sessionId"
+        dao.saveImport(Playlist(id, name, System.currentTimeMillis(), 0), tracks.mapIndexed { index, track -> track.toPlaylistEntry(id, index) })
+        return id
+    }
+
     suspend fun append(playlistId: String, track: Track) = dao.append(playlistId, track.toPlaylistEntry(playlistId, 0))
     suspend fun rename(playlistId: String, name: String) { require(name.isNotBlank()); dao.rename(playlistId, name) }
     suspend fun removeEntry(entryId: String) = dao.removeEntry(entryId)

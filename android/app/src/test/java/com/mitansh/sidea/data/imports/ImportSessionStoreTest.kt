@@ -116,6 +116,44 @@ class ImportSessionStoreTest {
         assertTrue(store.pending().isEmpty())
     }
 
+    @Test fun emptyOrMalformedDraftsAreNotResumable() {
+        val folder = Files.createTempDirectory("import-pending").toFile()
+        val store = store(folder)
+        store.save(session(emptyList()))
+        store.save(session(listOf(item(0, "Song"))).copy(id = "valid"))
+        File(folder, "wrong-id.import.json").writeText(File(folder, "valid.import.json").readText())
+        File(folder, "garbage.import.json").writeText("{}")
+        assertEquals(listOf("valid"), store.pending().map { it.id })
+    }
+
+    @Test fun partiallyCorruptRowSetsAreNotOfferedAsCompleteDrafts() {
+        val folder = Files.createTempDirectory("import-corrupt-row").toFile()
+        val store = store(folder)
+        store.save(session(listOf(item(0, "First"), item(1, "Second"))))
+        val file = File(folder, "session-1.import.json")
+        val root = com.grack.nanojson.JsonParser.`object`().from(file.readText())
+        root.getArray("items")[1] = null
+        file.writeText(com.grack.nanojson.JsonWriter.string(root))
+        assertTrue(store.pending().isEmpty())
+    }
+
+    @Test fun interruptedReplacementPreservesPreviouslyConfirmedSession() {
+        val folder = Files.createTempDirectory("import-replace").toFile()
+        val store = store(folder)
+        val original = session(listOf(item(0, "Original")))
+        store.save(original)
+        // Block the staging file: the previously acknowledged JSON must remain untouched.
+        val staging = File(folder, "session-1.import.json.tmp")
+        staging.mkdir()
+        File(staging, "blocker").writeText("busy")
+        try {
+            store.save(original.copy(title = "Unconfirmed"))
+            org.junit.Assert.fail("A failed replacement must not be acknowledged")
+        } catch (_: java.io.IOException) { }
+        assertEquals(original, store.load(original.id))
+        staging.deleteRecursively()
+    }
+
     @Test
     fun `the number of stored sessions is bounded`() {
         val folder = Files.createTempDirectory("import-session").toFile()

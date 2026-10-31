@@ -32,6 +32,17 @@ abstract class PlaylistDao {
         insertEntries(tracks)
     }
 
+    /** Recover only this import's destination, atomically replacing its ordered entries on retry. */
+    @Transaction
+    open suspend fun saveImport(playlist: Playlist, tracks: List<PlaylistTrackEntry>) {
+        if (playlistExists(playlist.id)) {
+            clearEntries(playlist.id)
+        } else {
+            insertPlaylist(playlist.copy(position = nextPlaylistPosition()))
+        }
+        insertEntries(tracks)
+    }
+
     @Transaction
     open suspend fun append(playlistId: String, entry: PlaylistTrackEntry) {
         insertEntries(listOf(entry.copy(position = nextEntryPosition(playlistId))))
