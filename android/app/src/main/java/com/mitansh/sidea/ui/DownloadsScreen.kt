@@ -31,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,7 +77,8 @@ fun DownloadsScreen(
                     color = SpokifyMuted, fontSize = 13.sp,
                 )
             }
-            Switch(checked = state.automaticEnabled, onCheckedChange = onAutomaticEnabled)
+            Switch(checked = state.automaticEnabled, onCheckedChange = onAutomaticEnabled,
+                modifier = Modifier.semantics { contentDescription = "Automatic downloads" })
         }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -95,7 +98,8 @@ fun DownloadsScreen(
                 "Allow automatic saves on mobile data.",
                 color = SpokifyMuted, fontSize = 13.sp, modifier = Modifier.weight(1f),
             )
-            Switch(checked = state.allowMetered, onCheckedChange = onAllowMetered)
+            Switch(checked = state.allowMetered, onCheckedChange = onAllowMetered,
+                modifier = Modifier.semantics { contentDescription = "Allow automatic saves on mobile data" })
         }
         if (state.items.isEmpty()) {
             Text(
