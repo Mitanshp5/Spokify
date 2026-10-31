@@ -48,6 +48,7 @@ fun NowPlayingScreen(
     trackId: String = "", onAddToPlaylist: (() -> Unit)? = null, error: String? = null,
     onRetry: () -> Unit = onPlayPause,
     queueTitle: String = "Your music",
+    onQueueAction: (QueueAction) -> Unit = {},
 ) {
     var showQueue by remember { mutableStateOf(false) }
     var showActions by remember { mutableStateOf(false) }
@@ -69,6 +70,9 @@ fun NowPlayingScreen(
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Playing from", color = Color.White, fontSize = 11.sp)
                     Text(queueTitle, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                TextButton(onClick = { showQueue = true; onShowQueue() }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("Queue", color = Color.White, fontWeight = FontWeight.Bold)
                 }
                 MotionIconButton(onClick = { showActions = true }) { Icon(painterResource(R.drawable.ic_more), "More song options", tint = Color.White) }
             }
@@ -118,7 +122,6 @@ fun NowPlayingScreen(
                         context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
                             .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, "$title — $artist\nhttps://music.youtube.com/watch?v=$trackId"), "Share song"))
                     }) { Icon(painterResource(R.drawable.ic_share), "Share song", tint = Color.White) }
-                    MotionIconButton(onClick = { showQueue = true; onShowQueue() }) { Icon(painterResource(R.drawable.ic_queue), "Open queue, $queueSize songs", tint = Color.White) }
                 }
             }
             error?.let {
@@ -138,6 +141,7 @@ fun NowPlayingScreen(
                         Text(artist, color = SpokifyMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     SongSaveButton(track, isFavorite, onToggleFavorite)
+                    TextButton(onClick = { showQueue = true; onShowQueue() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Queue", color = Color.White) }
                     MotionIconButton(onClick = onPlayPause) { PlayPauseIcon(isPlaying) }
                 }
                 LinearProgressIndicator(progress = { if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f },
@@ -147,21 +151,16 @@ fun NowPlayingScreen(
     }
     if (showActions) SongOptionsSheet(track, isFavorite, onToggleFavorite, onDownload, onAddToPlaylist, onDismiss = { showActions = false })
     if (showQueue) {
-        MotionBottomSheet(onDismiss = { showQueue = false }) { _ ->
-            Text("Queue", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-                items(queue, key = { it.index }) { entry ->
-                    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).motionClickable { onSelectQueueEntry(entry.index) }.padding(horizontal = 24.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(entry.title, color = if (entry.index == currentQueueIndex) SpokifyGreen else Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(entry.artist, color = SpokifyMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        if (entry.index == currentQueueIndex) Icon(painterResource(R.drawable.ic_music), "Current song", tint = SpokifyGreen)
-                    }
-                }
-            }
-        }
+        QueueSheet(QueueSnapshot(queue, currentQueueIndex, shuffleEnabled), onDismiss = { showQueue = false },
+            onAction = { action ->
+                onQueueAction(action)
+                if (action is QueueAction.Select) showQueue = false
+            })
     }
 }
 
-data class QueueEntry(val index: Int, val title: String, val artist: String)
+data class QueueEntry(
+    val index: Int, val title: String, val artist: String,
+    val artworkUrl: String? = null, val durationMs: Long = 0L,
+    val instanceId: Any = index,
+)

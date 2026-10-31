@@ -74,6 +74,10 @@ import com.mitansh.sidea.ui.MotionDestination
 import com.mitansh.sidea.ui.MiniPlayer
 import com.mitansh.sidea.ui.NowPlayingScreen
 import com.mitansh.sidea.ui.QueueEntry
+import com.mitansh.sidea.ui.QueueSnapshot
+import com.mitansh.sidea.ui.QueueCommand
+import com.mitansh.sidea.ui.queueCommands
+import com.mitansh.sidea.ui.queuePlaybackIndices
 import com.mitansh.sidea.ui.RadioSettingsScreen
 import com.mitansh.sidea.ui.SpokifyNavigationBar
 import com.mitansh.sidea.ui.SpokifyTab
@@ -102,6 +106,7 @@ private data class PlayerUiSnapshot(
     val currentIndex: Int = -1,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val shuffleEnabled: Boolean = false,
+    val queueSnapshot: QueueSnapshot = QueueSnapshot(),
 )
 
 class MainActivity : ComponentActivity() {
@@ -392,6 +397,7 @@ private fun SpokifyApp(
         MotionAppFrame(expanded = expanded && playerSnapshot.current != null, onDismissPlayer = { expanded = false }, player = {
             playerSnapshot.current?.let { currentTrack ->
             PlayerPosition(controller, playerSnapshot.positionMs) { position ->
+            val displayedQueue = playerSnapshot.queueSnapshot
             NowPlayingScreen(
                 title = currentTrack.title,
                 artist = currentTrack.artist,
@@ -403,9 +409,7 @@ private fun SpokifyApp(
                 positionMs = position,
                 durationMs = playerSnapshot.durationMs,
                 queueSize = playerSnapshot.queue.size,
-                queue = playerSnapshot.queue.mapIndexed { index, item ->
-                    QueueEntry(index, item.mediaMetadata.title?.toString().orEmpty(), item.mediaMetadata.artist?.toString().orEmpty())
-                },
+                queue = displayedQueue.order,
                 currentQueueIndex = playerSnapshot.currentIndex,
                 shuffleEnabled = playerSnapshot.shuffleEnabled,
                 repeatMode = playerSnapshot.repeatMode,
@@ -424,7 +428,23 @@ private fun SpokifyApp(
                     }
                 },
                 onShowQueue = { },
-                onSelectQueueEntry = { index -> if (index != playerSnapshot.currentIndex) controller?.seekTo(index, 0L) },
+                onQueueAction = { action ->
+                    controller?.let { player ->
+                        val commands = queueCommands(displayedQueue, player.toQueueSnapshot(), action)
+                        commands.forEach { command ->
+                            when (command) {
+                                is QueueCommand.Select -> {
+                                    if (command.seek) player.seekTo(command.index, 0L)
+                                    if (player.playerError != null || player.playbackState == Player.STATE_IDLE) player.prepare()
+                                    player.play()
+                                }
+                                is QueueCommand.Remove -> player.removeMediaItem(command.index)
+                                is QueueCommand.Move -> player.moveMediaItem(command.from, command.to)
+                            }
+                        }
+                        playerSnapshot = player.toUiSnapshot()
+                    }
+                },
                 onClose = { expanded = false },
                 trackId = currentTrack.id,
                 onAddToPlaylist = { manageSongSave(currentTrack) },
@@ -768,7 +788,24 @@ private fun MediaController?.toUiSnapshot(): PlayerUiSnapshot {
         currentIndex = player.currentMediaItemIndex,
         repeatMode = player.repeatMode,
         shuffleEnabled = player.shuffleModeEnabled,
+        queueSnapshot = player.toQueueSnapshot(),
     )
+}
+
+private fun MediaController.toQueueSnapshot(): QueueSnapshot {
+    val timeline = currentTimeline
+    val window = androidx.media3.common.Timeline.Window()
+    // Repeat is intentionally OFF for a single finite pass through the real playback order.
+    val indices = queuePlaybackIndices(timeline.windowCount, timeline.getFirstWindowIndex(shuffleModeEnabled)) { index ->
+        timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, shuffleModeEnabled)
+    }
+    val entries = indices.map { index ->
+        timeline.getWindow(index, window)
+        val metadata = window.mediaItem.mediaMetadata
+        QueueEntry(index, metadata.title?.toString().orEmpty(), metadata.artist?.toString().orEmpty(),
+            metadata.artworkUri?.toString(), metadata.durationMs ?: window.durationMs.coerceAtLeast(0L), window.uid)
+    }
+    return QueueSnapshot(entries, currentMediaItemIndex, shuffleModeEnabled)
 }
 
 @Composable
