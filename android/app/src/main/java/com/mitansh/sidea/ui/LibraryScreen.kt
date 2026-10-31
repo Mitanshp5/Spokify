@@ -1,5 +1,6 @@
 package com.mitansh.sidea.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -15,8 +16,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,19 +45,45 @@ fun LibraryScreen(
     var grid by rememberSaveable { mutableStateOf(false) }
     var nameSort by rememberSaveable { mutableStateOf(false) }
     var playlistOnly by rememberSaveable { mutableStateOf(false) }
-    val visible = remember(playlists, query, nameSort) {
-        playlists.filter { it.name.contains(query, true) }.let { rows ->
-            if (nameSort) rows.sortedBy { it.name.lowercase() } else rows.sortedByDescending { it.createdAtEpochMs }
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val closeSearch: () -> Unit = {
+        query = ""
+        searching = false
+        focusManager.clearFocus()
+        keyboard?.hide()
+    }
+    // The IME may consume the first Back; the next closes search before navigation.
+    BackHandler(enabled = searching || query.isNotEmpty(), onBack = closeSearch)
+    LaunchedEffect(searching) {
+        if (searching) {
+            focusRequester.requestFocus()
+            keyboard?.show()
         }
     }
+    val presentation = remember(playlists, query, nameSort, playlistOnly) {
+        LibrarySearchPresentation.from(playlists, query, nameSort, playlistOnly)
+    }
+    val visible = presentation.playlists
     Column(modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             ProfileButton(onOpenProfile)
-            Text("Your Library", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 12.dp))
-            MotionIconButton(onClick = { searching = !searching; if (!searching) query = "" }) { Icon(painterResource(R.drawable.ic_search), "Search your library", tint = Color.White) }
+            Text("Your Library", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 12.dp))
+            IconButton(onClick = { if (searching) closeSearch() else searching = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                Icon(painterResource(if (searching) R.drawable.ic_close else R.drawable.ic_search), if (searching) "Close library search" else "Search your library", tint = Color.White)
+            }
             MotionIconButton(onClick = onCreatePlaylist) { Icon(painterResource(R.drawable.ic_add), "Create playlist", tint = Color.White) }
         }
-        if (searching) OutlinedTextField(query, { query = it }, label = { Text("Search your library") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+        if (searching) OutlinedTextField(
+            query, { query = it }, label = { Text("Search your library") }, singleLine = true,
+            trailingIcon = {
+                if (query.isNotEmpty()) IconButton(onClick = { query = "" }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                    Icon(painterResource(R.drawable.ic_close), "Clear search")
+                }
+            },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).focusRequester(focusRequester),
+        )
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             HomePill("Playlists", playlistOnly) { playlistOnly = !playlistOnly }
             HomePill("Downloaded", false, onOpenOfflineReady)
@@ -67,8 +98,15 @@ fun LibraryScreen(
             MotionIconButton(onClick = { grid = !grid }) { Icon(painterResource(if (grid) R.drawable.ic_library else R.drawable.ic_grid), if (grid) "Show list" else "Show grid", tint = Color.White) }
         }
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp + LocalBottomContentPadding.current)) {
-            if ("Liked Songs".contains(query, true)) item { LibraryRow("Liked Songs", "Playlist · $favoriteCount songs", R.drawable.ic_favorite, listOf(Color(0xFF4A27BA), Color(0xFFB4DCC9)), onOpenFavorites) }
-            if ("On Repeat".contains(query, true)) item {
+            if (presentation.emptyKind == LibrarySearchEmptyKind.NO_RESULTS) item {
+                Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("No results for “${query.trim()}”", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text("Try another name or clear your search", color = SpokifyMuted, modifier = Modifier.padding(top = 8.dp))
+                    TextButton(onClick = { query = "" }, modifier = Modifier.padding(top = 12.dp).sizeIn(minWidth = 48.dp, minHeight = 48.dp)) { Text("Clear search") }
+                }
+            }
+            if (presentation.showLikedSongs) item { LibraryRow("Liked Songs", "Playlist · $favoriteCount songs", R.drawable.ic_favorite, listOf(Color(0xFF4A27BA), Color(0xFFB4DCC9)), onOpenFavorites) }
+            if (presentation.showOnRepeat) item {
                 Row(Modifier.fillMaxWidth().motionClickable(onClick = onOpenOnRepeat).padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                     OnRepeatArtwork(Modifier.size(64.dp), compact = true)
                     Column(Modifier.weight(1f).padding(start = 14.dp)) {
@@ -77,8 +115,8 @@ fun LibraryScreen(
                     }
                 }
             }
-            if (!playlistOnly && "Offline Backup".contains(query, true)) item { LibraryRow("Offline Backup", "$downloadCount songs ready to play", R.drawable.ic_downloaded, listOf(Color(0xFF176A53), Color(0xFF203D32)), onOpenOfflineReady) }
-            if (!playlistOnly && "Recently played".contains(query, true)) item { LibraryRow("Recently played", "$historyCount songs", R.drawable.ic_music, listOf(Color(0xFF775D30), Color(0xFF272421)), onOpenHistory) }
+            if (presentation.showOfflineBackup) item { LibraryRow("Offline Backup", "$downloadCount songs ready to play", R.drawable.ic_downloaded, listOf(Color(0xFF176A53), Color(0xFF203D32)), onOpenOfflineReady) }
+            if (presentation.showRecentlyPlayed) item { LibraryRow("Recently played", "$historyCount songs", R.drawable.ic_music, listOf(Color(0xFF775D30), Color(0xFF272421)), onOpenHistory) }
             if (grid) items(visible.chunked(2), key = { "grid:${it.first().id}" }, contentType = { "playlist-pair" }) { pair ->
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     pair.forEach { playlist ->
@@ -99,7 +137,7 @@ fun LibraryScreen(
                     }
                 }
             }
-            item {
+            if (presentation.emptyKind == LibrarySearchEmptyKind.NONE) item {
                 TextButton(onClick = onCreatePlaylist, modifier = Modifier.padding(horizontal = 10.dp, vertical = 14.dp)) { Icon(painterResource(R.drawable.ic_add), null); Spacer(Modifier.width(12.dp)); Text("Create a playlist") }
             }
         }
