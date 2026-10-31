@@ -643,6 +643,7 @@ private fun SpokifyApp(
                         )
                         SpokifyTab.LIBRARY -> LibraryScreen(
                             playlists = playlistCards,
+                            playerVisible = playerSnapshot.current != null && expanded,
                             favoriteCount = favorites.size,
                             historyCount = history.size,
                             downloadCount = completedDownloads.size,

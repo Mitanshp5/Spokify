@@ -2,6 +2,9 @@ package com.mitansh.sidea.ui
 
 internal enum class LibrarySearchEmptyKind { NONE, NO_RESULTS }
 
+internal fun librarySearchBackEnabled(searching: Boolean, query: String, playerVisible: Boolean): Boolean =
+    !playerVisible && (searching || query.isNotEmpty())
+
 internal data class LibrarySearchPresentation(
     val playlists: List<PlaylistCard>,
     val showLikedSongs: Boolean,

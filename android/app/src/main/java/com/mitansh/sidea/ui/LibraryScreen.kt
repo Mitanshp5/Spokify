@@ -39,6 +39,7 @@ fun LibraryScreen(
     onOpenImport: () -> Unit, onOpenProfile: () -> Unit, onOpenSettings: () -> Unit,
     onCreatePlaylist: () -> Unit, modifier: Modifier = Modifier,
     onRepeatCount: Int = 0, onOpenOnRepeat: () -> Unit = {},
+    playerVisible: Boolean = false,
 ) {
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -54,8 +55,8 @@ fun LibraryScreen(
         focusManager.clearFocus()
         keyboard?.hide()
     }
-    // The IME may consume the first Back; the next closes search before navigation.
-    BackHandler(enabled = searching || query.isNotEmpty(), onBack = closeSearch)
+    // Let the foreground player handle Back without clearing the search underneath it.
+    BackHandler(enabled = librarySearchBackEnabled(searching, query, playerVisible), onBack = closeSearch)
     LaunchedEffect(searching) {
         if (searching) {
             focusRequester.requestFocus()
