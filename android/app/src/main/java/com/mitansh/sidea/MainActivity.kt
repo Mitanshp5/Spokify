@@ -499,6 +499,7 @@ private fun SpokifyApp(
             MotionScreens(MotionDestination(tab, section, if (section == "playlist") selectedPlaylist else null), Modifier.fillMaxSize()) { destination ->
                 when (destination.section) {
                     "settings" -> com.mitansh.sidea.ui.SettingsScreen(
+                        playerVisible = expanded && playerSnapshot.current != null,
                         onBack = ::backSection, onPlayback = { settingsChild("radio") }, onDownloads = { settingsChild("downloads") },
                         onOffline = { settingsChild("offline") }, onImport = { settingsChild("import") }, onUpdates = { settingsChild("updates") }, historyCount = search.recent.size, onClearHistory = searches::clearHistory)
                     "updates" -> com.mitansh.sidea.ui.AppUpdatesScreen(updates, ::backSection)
@@ -626,6 +627,7 @@ private fun SpokifyApp(
                         )
 
                         SpokifyTab.SEARCH -> SearchScreen(
+                            playerVisible = expanded && playerSnapshot.current != null,
                             query = search.query,
                             onQueryChange = searches::updateQuery,
                             loading = search.loading,

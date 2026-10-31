@@ -37,12 +37,13 @@ fun SearchScreen(
     onAddToPlaylist: (Track) -> Unit, onHide: (Track) -> Unit = {}, modifier: Modifier = Modifier,
     recent: List<RecentSearch> = emptyList(), onRemoveRecent: (String) -> Unit = {}, onClearHistory: () -> Unit = {},
     onOpenProfile: () -> Unit = {}, onOpenOnRepeat: () -> Unit = {}, browseTracks: List<Track> = emptyList(),
+    playerVisible: Boolean = false,
 ) {
     val favoriteUids = remember(favorites) { favorites.mapTo(hashSetOf()) { it.uid } }
     var focused by rememberSaveable { mutableStateOf(query.isNotBlank()) }
     val requester = remember { FocusRequester() }
     val focus = LocalFocusManager.current
-    BackHandler(focused) { focused = false; focus.clearFocus(); onQueryChange("") }
+    BackHandler(enabled = searchBackEnabled(focused, playerVisible)) { focused = false; focus.clearFocus(); onQueryChange("") }
     LaunchedEffect(focused) { if (focused) requester.requestFocus() }
     Column(modifier.fillMaxSize().background(SpokifyInk)) {
         if (!focused) {

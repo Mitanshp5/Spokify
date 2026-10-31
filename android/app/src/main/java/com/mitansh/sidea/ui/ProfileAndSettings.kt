@@ -192,13 +192,14 @@ fun SettingsRow(title: String, subtitle: String, icon: Int, onClick: () -> Unit)
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onPlayback: () -> Unit, onDownloads: () -> Unit, onOffline: () -> Unit,
-    onImport: () -> Unit, onUpdates: () -> Unit, historyCount: Int, onClearHistory: () -> Unit) {
+    onImport: () -> Unit, onUpdates: () -> Unit, historyCount: Int, onClearHistory: () -> Unit,
+    playerVisible: Boolean = false) {
     val context = LocalContext.current
     var filter by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     var clear by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
-    BackHandler(searching) { searching = false; filter = "" }
+    BackHandler(enabled = searchBackEnabled(searching, playerVisible)) { searching = false; filter = "" }
     Column(Modifier.fillMaxSize().background(SpokifyInk)) {
         Row(Modifier.background(Color(0xFF272727)).fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
             MotionIconButton(onClick = onBack) { Icon(painterResource(R.drawable.ic_back), "Go back", tint = Color.White) }
