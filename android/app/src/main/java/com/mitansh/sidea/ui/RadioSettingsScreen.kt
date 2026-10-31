@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -47,7 +49,8 @@ fun RadioSettingsScreen(
                     color = SpokifyMuted, fontSize = 13.sp,
                 )
             }
-            Switch(checked = autoplayEnabled, onCheckedChange = onAutoplayEnabled)
+            Switch(checked = autoplayEnabled, onCheckedChange = onAutoplayEnabled,
+                modifier = Modifier.semantics { contentDescription = "Autoplay" })
         }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),

@@ -9,6 +9,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -37,6 +39,7 @@ fun QuietNotificationControls() {
                 Text("Silence notification sounds during music. Calls and alarms stay available; notifications remain visible.", color = SpokifyMuted, fontSize = 13.sp)
             }
             Switch(checked = status.enabled && status.permitted, enabled = status.supported,
+                modifier = Modifier.semantics { contentDescription = "Quiet notifications while playing" },
                 onCheckedChange = { enabled ->
                     quiet.setEnabled(enabled)
                     if (enabled && !status.permitted) quiet.requestAccess()
