@@ -43,6 +43,7 @@ import android.net.Uri
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.SessionCommand
@@ -89,6 +90,8 @@ class PlaybackService : MediaSessionService() {
     private var likedUids = emptySet<String>()
     private var savingFromNotification = false
     private val saveCommand = SessionCommand("com.mitansh.sidea.SAVE_LIKED_SONG", Bundle.EMPTY)
+    private lateinit var sleepTimer: SleepTimerController
+    private lateinit var sleepTimerCommands: SleepTimerCommandDispatcher
 
     override fun onCreate() {
         super.onCreate()
@@ -110,6 +113,13 @@ class PlaybackService : MediaSessionService() {
                         Uri.parse(kotlinx.coroutines.runBlocking(Dispatchers.IO) { catalog.resolveAudio(track).uri })
                     })))
             .build()
+        sleepTimer = SleepTimerController(SystemClock::elapsedRealtime, { player.pause() }, { state ->
+            // Existing WAKE_LOCK permission. Only an armed timer changes the default wake mode;
+            // ExoPlayer releases the lock while paused, and elapsedRealtime still advances.
+            player.setWakeMode(if (state.mode == SleepTimerCommands.MODE_OFF) C.WAKE_MODE_NONE else C.WAKE_MODE_LOCAL)
+            publishSleepTimer()
+        }, { player.pauseAtEndOfMediaItems }, { player.pauseAtEndOfMediaItems = it })
+        sleepTimerCommands = SleepTimerCommandDispatcher(sleepTimer)
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, true).build()
         player.addListener(object : Player.Listener {
@@ -118,6 +128,8 @@ class PlaybackService : MediaSessionService() {
                     player.mediaItemCount, player.playbackState, player.playbackSuppressionReason))
             }
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
+                sleepTimer.onTrackTransition(reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
                 clearRecovery()
                 if (PlaybackFeedbackPolicy.isNegativeFeedback(
                         PlaybackFeedbackPolicy.changeFor(reason),
@@ -143,8 +155,18 @@ class PlaybackService : MediaSessionService() {
             }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (!playWhenReady) cancelPendingRecovery()
+                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM)
+                    sleepTimer.onTrackEnded()
             }
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    if (oldPosition.mediaItemIndex != newPosition.mediaItemIndex) {
+                        sleepTimer.onTrackTransition(automatic = false)
+                    } else if (player.duration > 0L && newPosition.positionMs >= player.duration) {
+                        // A paused seek to the known end need not emit STATE_ENDED immediately.
+                        sleepTimer.onTrackEnded()
+                    }
+                }
                 if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION ||
                     reason == Player.DISCONTINUITY_REASON_SEEK && oldPosition.mediaItemIndex != newPosition.mediaItemIndex) {
                     flushPrevious(oldPosition)
@@ -163,7 +185,10 @@ class PlaybackService : MediaSessionService() {
                 saveQueueSnapshot()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) recordIfQualified(true)
+                if (playbackState == Player.STATE_ENDED) {
+                    sleepTimer.onTrackEnded()
+                    recordIfQualified(true)
+                }
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 recoverFromPlaybackError(error)
@@ -178,12 +203,18 @@ class PlaybackService : MediaSessionService() {
             override fun onConnectAsync(mediaSession: MediaSession, controller: MediaSession.ControllerInfo): ListenableFuture<MediaSession.ConnectionResult> {
                 val base = MediaSession.ConnectionResult.AcceptedResultBuilder(mediaSession, controller).build()
                 val commands = base.availableSessionCommands.buildUpon()
-                if (controller.isTrusted || controller.packageName == packageName) commands.add(saveCommand)
+                if (controller.isTrusted || controller.packageName == packageName) {
+                    commands.add(saveCommand)
+                    commands.add(SleepTimerCommands.SET)
+                    commands.add(SleepTimerCommands.GET)
+                }
                 return Futures.immediateFuture(MediaSession.ConnectionResult.AcceptedResultBuilder(mediaSession, controller)
                     .setAvailableSessionCommands(commands.build()).build())
             }
             override fun onCustomCommand(mediaSession: MediaSession, controller: MediaSession.ControllerInfo,
-                command: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
+                 command: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
+                if (command.customAction == SleepTimerCommands.ACTION_SET || command.customAction == SleepTimerCommands.ACTION_GET)
+                    return Futures.immediateFuture(handleSleepTimerCommand(controller, command, args))
                 if (command.customAction != saveCommand.customAction) return super.onCustomCommand(mediaSession, controller, command, args)
                 val track = player.currentMediaItem?.let(::trackOf)
                     ?: return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_INVALID_STATE))
@@ -226,6 +257,17 @@ class PlaybackService : MediaSessionService() {
                     mediaItems.map(::prepareItem), startIndex, startPositionMs))
             }
         }).build()
+        publishSleepTimer()
+        scope.launch {
+            // Service-owned, not tied to playback progress, Activity collectors, or wall-clock time.
+            // Each wake reads the current state, so a replaced/cancelled deadline cannot fire later.
+            while (true) {
+                sleepTimer.tick()
+                publishSleepTimer()
+                val remaining = sleepTimer.remainingMs()
+                delay(if (remaining > 0L) remaining.coerceAtMost(1_000L) else 1_000L)
+            }
+        }
         refreshMediaButtons()
         scope.launch {
             library.observeFavorites().collect { favorites ->
@@ -248,6 +290,46 @@ class PlaybackService : MediaSessionService() {
         restoreQueueSnapshot()
         // Songs that qualified earlier may still be waiting for an allowed network.
         scope.launch { OfflineRepository.get(this@PlaybackService).flushPendingAutomatic() }
+    }
+
+    @Suppress("DEPRECATION") // Bundle.get preserves types, unlike getters that coerce wrong types to defaults.
+    private fun handleSleepTimerCommand(controller: MediaSession.ControllerInfo,
+                                         command: SessionCommand, args: Bundle): SessionResult {
+        val trusted = controller.isTrusted || controller.packageName == packageName
+        if (!trusted) return SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED)
+        val values = try {
+            if (command.customAction == SleepTimerCommands.ACTION_SET)
+                args.get(SleepTimerCommands.KEY_MODE) to args.get(SleepTimerCommands.KEY_DURATION_MS)
+            else null to null
+        } catch (_: RuntimeException) { return SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE) }
+        val result = sleepTimerCommands.dispatch(command.customAction, trusted, values.first, values.second,
+            player.currentMediaItem != null)
+        if (result == SleepTimerCommandDispatcher.Result.SUCCESS &&
+            sleepTimer.state.mode == SleepTimerCommands.MODE_END_OF_TRACK &&
+            (player.playbackState == Player.STATE_ENDED || player.duration > 0L && player.currentPosition >= player.duration)) {
+            sleepTimer.onTrackEnded()
+        }
+        val code = when (result) {
+            SleepTimerCommandDispatcher.Result.SUCCESS -> SessionResult.RESULT_SUCCESS
+            SleepTimerCommandDispatcher.Result.BAD_VALUE -> SessionResult.RESULT_ERROR_BAD_VALUE
+            SleepTimerCommandDispatcher.Result.PERMISSION_DENIED -> SessionResult.RESULT_ERROR_PERMISSION_DENIED
+            SleepTimerCommandDispatcher.Result.INVALID_STATE -> SessionResult.RESULT_ERROR_INVALID_STATE
+            SleepTimerCommandDispatcher.Result.NOT_SUPPORTED -> SessionResult.RESULT_ERROR_NOT_SUPPORTED
+        }
+        publishSleepTimer()
+        return SessionResult(code, sleepTimerExtras())
+    }
+
+    private fun sleepTimerExtras() = Bundle().apply {
+        putString(SleepTimerCommands.KEY_MODE, sleepTimer.state.mode)
+        putLong(SleepTimerCommands.KEY_DEADLINE_MS, sleepTimer.state.deadlineElapsedRealtimeMs)
+        putLong(SleepTimerCommands.KEY_REMAINING_MS, sleepTimer.remainingMs())
+        putBoolean(SleepTimerCommands.KEY_END_OF_TRACK, sleepTimer.state.mode == SleepTimerCommands.MODE_END_OF_TRACK)
+    }
+
+    private fun publishSleepTimer() {
+        if (!::session.isInitialized) return
+        session.setSessionExtras(Bundle(session.sessionExtras).apply { putAll(sleepTimerExtras()) })
     }
 
     private fun refreshMediaButtons() {
@@ -588,6 +670,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        if (::sleepTimer.isInitialized) sleepTimer.close()
         cancelPendingRecovery()
         if (::quietNotifications.isInitialized) quietNotifications.setPlaybackActive(false)
         val callback = networkCallback

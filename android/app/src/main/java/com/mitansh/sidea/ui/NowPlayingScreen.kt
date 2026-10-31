@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,9 +50,15 @@ fun NowPlayingScreen(
     onRetry: () -> Unit = onPlayPause,
     queueTitle: String = "Your music",
     onQueueAction: (QueueAction) -> Unit = {},
+    sleepTimerState: SleepTimerUiState = SleepTimerUiState(),
+    onSleepTimerMinutes: (Int) -> Unit = {},
+    onSleepTimerEndOfSong: () -> Unit = {},
+    onSleepTimerCancel: () -> Unit = {},
+    onSleepTimerRefresh: () -> Unit = {},
 ) {
     var showQueue by remember { mutableStateOf(false) }
     var showActions by remember { mutableStateOf(false) }
+    var showSleepTimer by rememberSaveable { mutableStateOf(false) }
     var scrubPosition by remember(trackId) { mutableStateOf<Float?>(null) }
     var artworkColor by remember(artworkUrl) { mutableStateOf(Color(0xFF42574F)) }
     val backgroundColor by animateColorAsState(artworkColor, motionTween(500), label = "artwork background")
@@ -118,6 +125,9 @@ fun NowPlayingScreen(
                     if (download != null) Text(downloadLabel(download), color = if (download.isComplete) SpokifyGreen else SpokifyMuted, fontSize = 11.sp)
                 }
                 Row {
+                    TextButton(onClick = { showSleepTimer = true; onSleepTimerRefresh() }, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text("Sleep timer", color = if (sleepTimerState.ready && sleepTimerState.status?.active == true) SpokifyGreen else Color.White)
+                    }
                     MotionIconButton(onClick = {
                         context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
                             .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, "$title — $artist\nhttps://music.youtube.com/watch?v=$trackId"), "Share song"))
@@ -128,6 +138,15 @@ fun NowPlayingScreen(
                 Text(it, color = SpokifyError, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                 TextButton(onClick = onRetry) { Text("Retry playback", color = SpokifyGreen) }
             }
+            Text(
+                when {
+                    sleepTimerState.pending -> "Updating sleep timer…"
+                    !sleepTimerState.ready && sleepTimerState.error != null -> "Sleep timer unavailable · Tap Sleep timer"
+                    else -> sleepTimerState.summary
+                },
+                color = if (sleepTimerState.ready && sleepTimerState.status?.active == true) SpokifyGreen else SpokifyMuted,
+                fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp),
+            )
             Spacer(Modifier.height(20.dp))
             LyricsCard(track, positionMs, onSeek, isPlaying, onPlayPause, background = lerp(backgroundColor, Color(0xFF842343), .5f))
             Spacer(Modifier.height(24.dp))
@@ -150,6 +169,8 @@ fun NowPlayingScreen(
         }
     }
     if (showActions) SongOptionsSheet(track, isFavorite, onToggleFavorite, onDownload, onAddToPlaylist, onDismiss = { showActions = false })
+    if (showSleepTimer) SleepTimerSheet(sleepTimerState, onSleepTimerMinutes, onSleepTimerEndOfSong,
+        onSleepTimerCancel, onSleepTimerRefresh, onDismiss = { showSleepTimer = false })
     if (showQueue) {
         QueueSheet(QueueSnapshot(queue, currentQueueIndex, shuffleEnabled), onDismiss = { showQueue = false },
             onAction = { action ->

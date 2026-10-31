@@ -92,6 +92,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import androidx.room.withTransaction
 import com.mitansh.sidea.ui.SaveToPlaylistSheet
+import com.mitansh.sidea.ui.rememberSleepTimer
 
 private const val POSITION_TICK_MS = 500L
 
@@ -186,6 +187,7 @@ private fun SpokifyApp(
 
     val search by searches.state.collectAsStateWithLifecycle()
     var playerSnapshot by remember(controller) { mutableStateOf(controller.toUiSnapshot()) }
+    val sleepTimer = rememberSleepTimer(controller)
     var handledNotificationOpen by rememberSaveable { mutableLongStateOf(0L) }
     LaunchedEffect(notificationOpen, playerSnapshot.current?.uid) {
         if (notificationOpen > handledNotificationOpen && playerSnapshot.current != null) {
@@ -405,6 +407,11 @@ private fun SpokifyApp(
                 queueTitle = playerSnapshot.queue.getOrNull(playerSnapshot.currentIndex)?.mediaMetadata?.extras?.getString("queue_title") ?: "Your music",
                 isPlaying = playerSnapshot.isPlaying,
                 isBuffering = playerSnapshot.isBuffering,
+                sleepTimerState = sleepTimer.state,
+                onSleepTimerMinutes = sleepTimer::setMinutes,
+                onSleepTimerEndOfSong = sleepTimer::endOfSong,
+                onSleepTimerCancel = sleepTimer::cancel,
+                onSleepTimerRefresh = sleepTimer::refresh,
                 isFavorite = favorites.any { it.uid == currentTrack.uid },
                 positionMs = position,
                 durationMs = playerSnapshot.durationMs,
