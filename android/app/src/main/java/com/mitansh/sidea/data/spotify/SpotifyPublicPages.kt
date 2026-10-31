@@ -51,6 +51,9 @@ internal object SpotifyPublicPages {
                 durationMs = (data.map("duration")["totalMilliseconds"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0,
                 sourceId = uri?.takeIf { it.startsWith("spotify:track:") }?.removePrefix("spotify:track:")?.takeIf { Regex("[A-Za-z0-9]{22}").matches(it) },
                 savedAt = row.map("addedAt")["isoString"] as? String ?: "",
+                artworkUrl = (data.map("albumOfTrack").map("coverArt")["sources"] as? List<*>)
+                    ?.firstNotNullOfOrNull { (it as? Map<*, *>)?.get("url") as? String }
+                    ?.takeIf { it.isNotBlank() },
             )
         }
         val paging = content.map("pagingInfo")

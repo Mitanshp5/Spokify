@@ -61,6 +61,24 @@ class ImportSessionStoreTest {
         assertEquals(1, reloaded.items[0].alternatives.size)
     }
 
+    @Test fun optionalSourceArtworkRoundTripsAndOldSessionsStillLoad() {
+        val folder = Files.createTempDirectory("import-artwork").toFile()
+        val store = store(folder)
+        store.save(session(listOf(item(0, "Song"))))
+        val file = File(folder, "session-1.import.json")
+        val legacy = file.readText()
+        val withArt = legacy.replace("\"position\":0", "\"position\":0,\"sourceArtworkUrl\":\"https://example.test/source\"")
+        file.writeText(withArt)
+        val loaded = store.load("session-1")!!
+        fun artwork(item: ImportedItem): String? = item.sourceArtworkUrl
+        assertEquals("https://example.test/source", artwork(loaded.items.single()))
+        store.save(loaded)
+        assertEquals("https://example.test/source", artwork(store.load("session-1")!!.items.single()))
+        file.writeText(legacy)
+        assertNull(artwork(store.load("session-1")!!.items.single()))
+        assertEquals("Song", store.load("session-1")!!.items.single().selected!!.title)
+    }
+
     @Test
     fun `a session that was not committed is pending`() {
         val folder = Files.createTempDirectory("import-session").toFile()

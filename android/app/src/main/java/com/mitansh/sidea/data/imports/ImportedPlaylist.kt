@@ -47,6 +47,8 @@ data class ImportedItem(
     val alternatives: List<Track> = emptyList(),
     /** How the choice was made. */
     val status: Status = Status.MISSING,
+    /** Source-provided cover, independent of the chosen playable recording. */
+    val sourceArtworkUrl: String? = null,
 ) {
     enum class Status { MATCHED, REVIEW, MISSING }
 }

@@ -68,6 +68,14 @@ class ImportCoordinatorTest {
         assertEquals(1, playlists.observePlaylists().first().size)
     }
 
+    @Test fun sourceArtworkSurvivesReadAndSessionReload() = runBlocking {
+        val (coordinator, sessions) = fixture(rows = """{"title":"Song","albumArt":{"sources":[{"url":"https://i.scdn.co/image/source"}]}}""")
+        val session = coordinator.read(link).session
+        fun artwork(item: ImportedItem): String? = item.sourceArtworkUrl
+        assertEquals("https://i.scdn.co/image/source", artwork(session.items.single()))
+        assertEquals("https://i.scdn.co/image/source", artwork(sessions.load(session.id)!!.items.single()))
+    }
+
     @Test fun concurrentSavesOfOneSessionCreateOnePlaylist() = runBlocking {
         val (coordinator, _) = fixture(search = { listOf(a) })
         val session = coordinator.read(link).session

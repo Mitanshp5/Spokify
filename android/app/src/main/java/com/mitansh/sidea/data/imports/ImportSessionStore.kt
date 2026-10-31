@@ -57,6 +57,7 @@ class ImportSessionStore(private val folder: File) {
             entry.put("artist", item.artist)
             entry.put("durationMs", item.durationMs)
             entry.put("status", item.status.name)
+            item.sourceArtworkUrl?.let { entry.put("sourceArtworkUrl", it) }
             item.selected?.let { selected ->
                 val track = JsonObject()
                 track.put("id", selected.id)
@@ -100,6 +101,7 @@ class ImportSessionStore(private val folder: File) {
                     title = entry.getString("title").orEmpty(),
                     artist = entry.getString("artist").orEmpty(),
                     durationMs = entry.getLong("durationMs") ?: 0L,
+                    sourceArtworkUrl = entry.getString("sourceArtworkUrl"),
                     selected = entry.getObject("selected")?.toTrack(),
                     alternatives = entry.getArray("alternatives")?.mapNotNull { alternative ->
                         (alternative as? JsonObject)?.toTrack()

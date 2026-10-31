@@ -9,7 +9,7 @@ import kotlinx.coroutines.CancellationException
 
 enum class SpotifyCompleteness { COMPLETE, PARTIAL, UNKNOWN }
 data class SpotifyPlaylistPreview(val id: String, val title: String, val tracks: List<SpotifySourceTrack>, val completeness: SpotifyCompleteness, val declaredCount: Int? = null, val warning: String? = null)
-data class SpotifySourceTrack(val position: Int, val title: String, val artist: String, val durationMs: Long, val sourceId: String?, val savedAt: String = "")
+data class SpotifySourceTrack(val position: Int, val title: String, val artist: String, val durationMs: Long, val sourceId: String?, val savedAt: String = "", val artworkUrl: String? = null)
 
 object SpotifyPlaylist {
     private val idPattern = Regex("[A-Za-z0-9]{22}")
@@ -38,7 +38,11 @@ object SpotifyPlaylist {
         val tracks = list.take(MAX_TRACKS).mapIndexed { i, item ->
             val row = item as? Map<*, *> ?: emptyMap<Any?, Any?>()
             val uri = row["uri"] as? String
-            SpotifySourceTrack(i, row["title"] as? String ?: "", row["subtitle"] as? String ?: "", (row["duration"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0, uri?.removePrefix("spotify:track:")?.takeIf(idPattern::matches))
+            val albumArt = row["albumArt"] as? Map<*, *>
+            val sources = albumArt?.get("sources") as? List<*>
+            val artwork = sources?.firstNotNullOfOrNull { (it as? Map<*, *>)?.get("url") as? String }
+                ?.takeIf { it.isNotBlank() }
+            SpotifySourceTrack(i, row["title"] as? String ?: "", row["subtitle"] as? String ?: "", (row["duration"] as? Number)?.toLong()?.coerceAtLeast(0) ?: 0, uri?.removePrefix("spotify:track:")?.takeIf(idPattern::matches), artworkUrl = artwork)
         }
         val rawDeclared = entity["trackCount"] ?: entity["totalTracks"] ?: entity["total"]
         val declared = rawDeclared?.let {

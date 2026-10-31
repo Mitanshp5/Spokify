@@ -97,6 +97,7 @@ class ImportCoordinator(
                 durationMs = item.durationMs,
                 selected = track,
                 status = ImportedItem.Status.MATCHED,
+                sourceArtworkUrl = item.artworkUrl,
             )
         }
         val session = ImportSessionStore.Session(
@@ -130,6 +131,7 @@ class ImportCoordinator(
                 title = match.source.title,
                 artist = match.source.artist,
                 durationMs = match.source.durationMs,
+                sourceArtworkUrl = match.source.artworkUrl,
                 selected = match.selected,
                 alternatives = match.alternatives,
                 status = when (match.status) {
