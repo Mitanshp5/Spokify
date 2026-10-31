@@ -296,12 +296,32 @@ fun MotionBottomSheet(onDismiss: () -> Unit, color: Color = SpokifyElevated,
 /** Selected playback modes retain a dot as well as colour, matching the phone reference. */
 @Composable
 fun PlaybackModeButton(selected: Boolean, icon: Int, description: String, onClick: () -> Unit, badge: String? = null) {
+    val mode = PlaybackModeKey(selected, badge)
+    val motion = LocalMotionEnabled.current
+    var previous by remember { mutableStateOf<PlaybackModeKey?>(null) }
+    val phase = remember { Animatable(0f) }
+    LaunchedEffect(mode, motion) {
+        val animate = PlaybackModeMotion.shouldAnimate(previous, mode, motion)
+        // Record before suspending: rapid toggles cancel this pulse, not the latest mode.
+        previous = mode
+        phase.snapTo(0f)
+        if (animate) {
+            phase.animateTo(1f, tween(PlaybackModeMotion.riseMs, easing = FastOutSlowInEasing))
+            phase.animateTo(0f, tween(PlaybackModeMotion.settleMs, easing = FastOutSlowInEasing))
+        }
+    }
     val tint by animateColorAsState(if (selected) SpokifyGreen else Color.White, motionTween(160), label = "playback mode tint")
     Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-        MotionIconButton(onClick = onClick) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(painterResource(icon), description, Modifier.size(25.dp), tint = tint)
-                badge?.let { Text(it, color = tint, fontSize = 9.sp) }
+        MotionIconButton(onClick = onClick, modifier = Modifier.size(48.dp).playbackModeSemantics(selected, badge, description)) {
+            Box(Modifier.graphicsLayer {
+                // Gate drawing too, so disabling motion never leaves an in-flight transform visible.
+                val amount = if (motion) phase.value else 0f
+                rotationZ = PlaybackModeMotion.rotation(amount)
+                scaleX = PlaybackModeMotion.scale(amount)
+                scaleY = scaleX
+            }, contentAlignment = Alignment.Center) {
+                Icon(painterResource(icon), null, Modifier.size(25.dp), tint = tint)
+                badge?.let { Text(it, modifier = Modifier.semantics { hideFromAccessibility() }, color = tint, fontSize = 9.sp) }
             }
         }
         AnimatedVisibility(selected, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp),
