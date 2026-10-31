@@ -467,7 +467,7 @@ private fun SpokifyApp(
             Box(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
             if (!keyboardVisible) Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .background(Brush.verticalGradient(0f to Color.Transparent, .45f to Color.Black.copy(alpha = .65f), 1f to Color.Black))
-                .navigationBarsPadding().onSizeChanged { chromeHeight = with(density) { it.height.toDp() } }) {
+                .onSizeChanged { chromeHeight = with(density) { it.height.toDp() } }.navigationBarsPadding()) {
             MotionMiniPlayer {
             playerSnapshot.current?.let { track ->
                 PlayerPosition(controller, playerSnapshot.positionMs) { position ->
