@@ -681,41 +681,20 @@ private fun SpokifyApp(
     }
 
     if (dialog != null) {
+        val dialogState = remember(dialog, selectedPlaylist) {
+            com.mitansh.sidea.ui.PlaylistDialogState(dialog!!, selectedPlaylist)
+        }
         SpokifyTheme {
-            AlertDialog(
-                onDismissRequest = { dialog = null },
-                title = { Text(when (dialog) { "create" -> "New playlist"; "rename" -> "Rename playlist"; else -> "Delete playlist?" }) },
-                text = {
-                    if (dialog == "create" || dialog == "rename") {
-                        OutlinedTextField(
-                            if (dialog == "rename") renameName else playlistName,
-                            { if (dialog == "rename") renameName = it else playlistName = it },
-                            label = { Text("Name") },
-                            singleLine = true,
-                        )
-                    } else {
-                        Text("This permanently removes the playlist and its songs.")
-                    }
+            com.mitansh.sidea.ui.PlaylistManagementDialog(
+                state = dialogState,
+                draft = if (dialogState.action == "rename") renameName else playlistName,
+                onDraftChange = { if (dialogState.action == "rename") renameName = it else playlistName = it },
+                onCommit = { operation -> operation.commitTo(playlists) },
+                onSuccess = {
+                    if (dialogState.action == "delete") { selectedPlaylist = null; section = null }
+                    dialog = null
                 },
-                confirmButton = {
-                    TextButton(onClick = {
-                        // The values are read here, before the coroutine starts, so a later change
-                        // to the dialog state cannot change what is saved.
-                        val action = dialog
-                        val id = selectedPlaylist
-                        val newName = if (action == "rename") renameName.trim() else playlistName.trim()
-                        scope.launch {
-                            when (action) {
-                                "create" -> if (newName.isNotBlank()) playlists.create(newName)
-                                "rename" -> if (id != null && newName.isNotBlank()) playlists.rename(id, newName)
-                                "delete" -> if (id != null) playlists.deletePlaylist(id)
-                            }
-                        }
-                        if (action == "delete") { selectedPlaylist = null; section = null }
-                        dialog = null
-                    }) { Text(if (dialog == "delete") "Delete" else "Save") }
-                },
-                dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } },
+                onDismiss = { dialog = null },
             )
         }
     }
