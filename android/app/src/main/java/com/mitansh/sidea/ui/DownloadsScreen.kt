@@ -2,6 +2,8 @@ package com.mitansh.sidea.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -194,11 +196,12 @@ private fun StorageLimitDialog(current: Long, onDismiss: () -> Unit, onChoose: (
     )
     var custom by remember { mutableStateOf("") }
     var showCustom by remember { mutableStateOf(false) }
+    val customBytes = storageLimitBytes(custom)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Automatic download limit") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
                     "Songs you play often are saved automatically up to this size.",
                     color = SpokifyMuted,
@@ -220,15 +223,17 @@ private fun StorageLimitDialog(current: Long, onDismiss: () -> Unit, onChoose: (
                         Modifier.fillMaxWidth().padding(top = 8.dp),
                         label = { Text("Custom size in MiB") },
                         singleLine = true,
+                        isError = custom.isNotEmpty() && customBytes == null,
+                        supportingText = { Text("Enter 100–51200 MiB (up to 50 GiB).") },
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             keyboardType = KeyboardType.Number,
                         ),
                     )
                     Button(
                         onClick = {
-                            val mib = custom.toLongOrNull()
-                            if (mib != null && mib > 0) onChoose(mib * 1024 * 1024)
+                            customBytes?.let(onChoose)
                         },
+                        enabled = customBytes != null,
                         modifier = Modifier.padding(top = 8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = SpokifyGreen),
                     ) { Text("Use this size") }
