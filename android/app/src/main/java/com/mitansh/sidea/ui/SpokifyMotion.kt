@@ -280,7 +280,15 @@ fun Modifier.playerArtwork(trackId: String): Modifier = composed {
 @Composable
 fun MotionBottomSheet(onDismiss: () -> Unit, color: Color = SpokifyElevated,
     content: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit) {
-    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    MotionBottomSheet(onDismiss, color, rememberModalBottomSheetState(skipPartiallyExpanded = true), content)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MotionBottomSheet(onDismiss: () -> Unit, color: Color = SpokifyElevated,
+    sheetState: SheetState,
+    content: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit) {
+    val state = sheetState
     val scope = rememberCoroutineScope()
     val callback by rememberUpdatedState(onDismiss)
     var closing by remember { mutableStateOf(false) }

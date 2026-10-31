@@ -19,6 +19,9 @@ sealed interface QueueAction {
     data class Select(val entry: QueueEntry) : QueueAction
     data class Remove(val entry: QueueEntry) : QueueAction
     data class Move(val entry: QueueEntry, val up: Boolean) : QueueAction
+    data class MoveTo(val entry: QueueEntry, val target: QueueEntry) : QueueAction
+    data class RemoveSelected(val entries: List<QueueEntry>) : QueueAction
+    data object ClearManual : QueueAction
     data object ClearUpcoming : QueueAction
 }
 
@@ -45,6 +48,12 @@ fun queueCommands(expected: QueueSnapshot, actual: QueueSnapshot, action: QueueA
     if (expected != actual) return emptyList()
     val presentation = actual.presentation
     return when (action) {
+        is QueueAction.MoveTo -> {
+            if (action.entry in presentation.upcoming && action.target in presentation.upcoming && action.entry != action.target && action.entry.origin == action.target.origin)
+                listOf(QueueCommand.Move(action.entry.index, action.target.index)) else emptyList()
+        }
+        is QueueAction.RemoveSelected -> if (action.entries.isNotEmpty() && action.entries.all { it in presentation.upcoming })
+            action.entries.distinct().sortedByDescending { it.index }.map { QueueCommand.Remove(it.index) } else emptyList()
         is QueueAction.Select -> if (action.entry in actual.order) {
             listOf(QueueCommand.Select(action.entry.index, action.entry.index != actual.currentIndex))
         } else emptyList()
@@ -54,12 +63,18 @@ fun queueCommands(expected: QueueSnapshot, actual: QueueSnapshot, action: QueueA
         is QueueAction.Move -> {
             val position = presentation.upcoming.indexOf(action.entry)
             val target = position + if (action.up) -1 else 1
-            if (actual.shuffled || position < 0 || target !in presentation.upcoming.indices) emptyList()
+            if (position < 0 || target !in presentation.upcoming.indices ||
+                action.entry.origin != presentation.upcoming[target].origin) emptyList()
             else listOf(QueueCommand.Move(action.entry.index, presentation.upcoming[target].index))
         }
+        QueueAction.ClearManual -> presentation.upcoming.filter { it.origin == com.mitansh.sidea.playback.QueueOrigin.MANUAL }
+            .sortedByDescending { it.index }.map { QueueCommand.Remove(it.index) }
         QueueAction.ClearUpcoming -> presentation.upcoming.sortedByDescending { it.index }.map { QueueCommand.Remove(it.index) }
     }
 }
+
+fun queueSelection(selected: Set<Any>, snapshot: QueueSnapshot): Set<Any> =
+    selected.intersect(snapshot.presentation.upcoming.map { it.instanceId }.toSet())
 
 data class QueuePresentation(
     val current: QueueEntry? = null,

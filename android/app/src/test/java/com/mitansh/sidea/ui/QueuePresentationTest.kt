@@ -4,6 +4,28 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class QueuePresentationTest {
+    @Test fun `normal Clear removes manual pending duplicates only not current history source or radio`() {
+        val manual = com.mitansh.sidea.playback.QueueOrigin.MANUAL
+        val radio = com.mitansh.sidea.playback.QueueOrigin.RADIO
+        val state = QueueSnapshot(listOf(entry(0).copy(origin = manual), entry(1).copy(origin = manual),
+            entry(2).copy(origin = manual), entry(3).copy(origin = manual), entry(4), entry(5).copy(origin = radio)), 1, true)
+        assertEquals(listOf(QueueCommand.Remove(3), QueueCommand.Remove(2)), queueCommands(state, state, QueueAction.ClearManual))
+        assertTrue(queueCommands(state, state.copy(currentIndex = 2), QueueAction.ClearManual).isEmpty())
+        val cleared = state.copy(order = state.order.filter { it.index !in listOf(2, 3) })
+        assertTrue(queueCommands(cleared, cleared, QueueAction.ClearManual).isEmpty())
+    }
+
+    @Test fun `selection drops current removed and stale identities but retains moved occurrences`() {
+        val state = QueueSnapshot((0..3).map(::entry), 1)
+        assertEquals(setOf("instance-2"), queueSelection(setOf("instance-0", "instance-1", "instance-2", "removed"), state))
+        val moved = state.copy(order = listOf(entry(0), entry(1), entry(3), entry(2)))
+        assertEquals(setOf("instance-2"), queueSelection(setOf("instance-2"), moved))
+        assertTrue(queueSelection(setOf("instance-2"), moved.copy(currentIndex = 2)).isEmpty())
+    }
+    @Test fun `shuffle successors can be reordered without touching current`() {
+        val state = QueueSnapshot((0..3).map(::entry), 0, true)
+        assertEquals(listOf(QueueCommand.Move(3, 2)), queueCommands(state, state, QueueAction.Move(entry(3), true)))
+    }
     @Test fun `lazy row keys are saveable primitives stable across duplicate row index changes`() {
         val keys = QueueRowKeys()
         val firstUid = Any()
@@ -60,7 +82,8 @@ class QueuePresentationTest {
         assertTrue(queueCommands(state, state, QueueAction.Move(entry(2), true)).isEmpty())
         assertTrue(queueCommands(state, state, QueueAction.Move(entry(3), false)).isEmpty())
         val shuffled = state.copy(shuffled = true)
-        assertTrue(queueCommands(shuffled, shuffled, QueueAction.Move(entry(3), true)).isEmpty())
+        // Shuffle is now executed by the service's explicit plan, so successor moves are safe.
+        assertEquals(listOf(QueueCommand.Move(3, 2)), queueCommands(shuffled, shuffled, QueueAction.Move(entry(3), true)))
         val removed = state.copy(order = listOf(entry(0), entry(1), entry(3)))
         assertTrue(queueCommands(state, removed, QueueAction.Remove(entry(2))).isEmpty())
         assertTrue(queueCommands(state, state.copy(currentIndex = 2), QueueAction.ClearUpcoming).isEmpty())

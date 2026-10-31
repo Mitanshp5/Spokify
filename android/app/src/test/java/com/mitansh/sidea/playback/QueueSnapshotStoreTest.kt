@@ -16,6 +16,51 @@ import java.nio.file.Files
  * again. The store keeps the queue, the position and the seed the radio is building on.
  */
 class QueueSnapshotStoreTest {
+    @Test fun `snapshot writes canonical occurrence order for shuffle off after restart`() {
+        val folder = Files.createTempDirectory("queue-canonical").toFile()
+        val input = QueueSnapshotStore.Snapshot(listOf(track("same"), track("same")), 0, 1200L, null,
+            listOf(QueueOccurrence("a"), QueueOccurrence("b")), true)
+        store(folder).save(input)
+        val json = com.grack.nanojson.JsonParser.`object`().from(File(folder, "queue-snapshot.json").readText())
+        assertEquals(listOf("a", "b"), json.getArray("canonicalOrder")?.toList())
+    }
+
+    @Test fun `legacy snapshot loads distinct context occurrences for repeated recordings`() {
+        val folder = Files.createTempDirectory("queue-legacy").toFile()
+        File(folder, "queue-snapshot.json").writeText("""{"items":[{"id":"same"},{"id":"same"}],"currentIndex":0,"positionMs":1234}""")
+        val restored = store(folder).load()!!
+        assertEquals(2, restored.occurrences.size)
+        assertEquals(listOf(QueueOrigin.CONTEXT, QueueOrigin.CONTEXT), restored.occurrences.map { it.origin })
+        assertEquals(2, restored.occurrences.map { it.id }.distinct().size)
+        assertEquals(1234L, restored.positionMs)
+    }
+
+    @Test fun `occurrence provenance context shuffle and pending order roundtrip`() {
+        val folder = Files.createTempDirectory("queue-origins").toFile()
+        val input = QueueSnapshotStore.Snapshot(listOf(track("same"), track("same"), track("radio")), 0, 4321L, track("seed"),
+            listOf(QueueOccurrence("current", QueueOrigin.CONTEXT, "Playlist"), QueueOccurrence("manual", QueueOrigin.MANUAL, "Playlist"),
+                QueueOccurrence("radio", QueueOrigin.RADIO, "Playlist")), true)
+        store(folder).save(input)
+        assertEquals(input, store(folder).load())
+    }
+
+    @Test fun `shuffled restart restores canonical pending source order and rejects malformed saved ordering`() {
+        val folder = Files.createTempDirectory("queue-canonical-restore").toFile()
+        val entries = listOf(QueueOccurrence("history", QueueOrigin.MANUAL), QueueOccurrence("current"),
+            QueueOccurrence("manual", QueueOrigin.MANUAL), QueueOccurrence("c3"), QueueOccurrence("c1"), QueueOccurrence("c2"))
+        val canonical = listOf("history", "current", "manual", "c1", "c2", "c3")
+        val input = QueueSnapshotStore.Snapshot(entries.map { track("same") }, 1, 12345L, null, entries, true, canonical)
+        store(folder).save(input)
+        val restored = store(folder).load()!!
+        assertEquals(input, restored)
+        val policy = QueueOrderPolicy().apply { restore(restored.canonicalOrder) }
+        assertEquals(canonical, policy.planned(restored.occurrences, restored.currentIndex, false))
+        val file = File(folder, "queue-snapshot.json")
+        val json = com.grack.nanojson.JsonParser.`object`().from(file.readText())
+        json.put("canonicalOrder", com.grack.nanojson.JsonArray().apply { add("stale"); add("stale") })
+        file.writeText(com.grack.nanojson.JsonWriter.string(json))
+        assertEquals(entries.map { it.id }, store(folder).load()!!.canonicalOrder)
+    }
 
     private fun store(folder: File) = QueueSnapshotStore(File(folder, "queue-snapshot.json"))
 

@@ -40,6 +40,8 @@ data class SongEnvironment(
     val savingUids: Set<String> = emptySet(),
     val onSave: ((Track) -> Unit)? = null,
     val onManageSave: ((Track) -> Unit)? = null,
+    val onPlayNext: ((Track) -> Unit)? = null,
+    val onAddToQueue: ((Track) -> Unit)? = null,
 )
 
 val LocalSongEnvironment = compositionLocalOf { SongEnvironment() }
@@ -131,6 +133,12 @@ fun SongOptionsSheet(
             }
         }
         HorizontalDivider(color = Color.White.copy(alpha = .08f))
+        environment.onPlayNext?.let { action ->
+            SheetAction("Play next", R.drawable.ic_music) { action(track); dismiss() }
+        }
+        environment.onAddToQueue?.let { action ->
+            SheetAction("Add to queue", R.drawable.ic_add_circle) { action(track); dismiss() }
+        }
         val manage = environment.onManageSave?.let { action -> { action(track) } } ?: onAddToPlaylist
         SheetAction("Add to playlist", R.drawable.ic_add_circle) {
             if (manage != null) afterDismiss = manage else onFavorite()

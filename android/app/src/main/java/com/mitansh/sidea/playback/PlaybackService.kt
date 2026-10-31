@@ -92,6 +92,26 @@ class PlaybackService : MediaSessionService() {
     private val saveCommand = SessionCommand("com.mitansh.sidea.SAVE_LIKED_SONG", Bundle.EMPTY)
     private lateinit var sleepTimer: SleepTimerController
     private lateinit var sleepTimerCommands: SleepTimerCommandDispatcher
+    private val queueOrder = QueueOrderPolicy()
+    private val queueCommand = SessionCommand(QueueRequest.ACTION, Bundle.EMPTY)
+    private var editingQueue = false
+    private val queueCommands by lazy { QueueCommandDispatcher(object : QueueMutationPort {
+        override val occurrences get() = queueOccurrences()
+        override val currentIndex get() = player.currentMediaItemIndex
+        override fun insert(index: Int, track: Track, occurrence: QueueOccurrence) {
+            if (player.mediaItemCount == 0) {
+                radioJob?.cancel(); radioJob = null
+                radioRetryAt = 0L; radioFailures = 0; earlySkips.clear()
+                queue.begin(track)
+            }
+            player.addMediaItem(index, prepareItem(withOccurrence(mediaItemFor(track), occurrence)))
+        }
+        override fun remove(index: Int) = player.removeMediaItem(index)
+        override fun move(from: Int, to: Int) = player.moveMediaItem(from, to)
+        override fun synchronizeOrder() {
+            player.setShuffleOrder(queueShuffleOrder(player.mediaItemCount))
+        }
+    }, queueOrder) }
 
     override fun onCreate() {
         super.onCreate()
@@ -113,6 +133,7 @@ class PlaybackService : MediaSessionService() {
                         Uri.parse(kotlinx.coroutines.runBlocking(Dispatchers.IO) { catalog.resolveAudio(track).uri })
                     })))
             .build()
+        player.setShuffleOrder(queueShuffleOrder(0))
         sleepTimer = SleepTimerController(SystemClock::elapsedRealtime, { player.pause() }, { state ->
             // Existing WAKE_LOCK permission. Only an armed timer changes the default wake mode;
             // ExoPlayer releases the lock while paused, and elapsedRealtime still advances.
@@ -148,7 +169,13 @@ class PlaybackService : MediaSessionService() {
                 listening.startTrack(player.currentPosition); recorded = false
                 refreshMediaButtons()
             }
-            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) { refreshMediaButtons() }
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                if (!restoringQueue) {
+                    applyQueueOrder(queueOrder.planned(queueOccurrences(), player.currentMediaItemIndex, shuffleModeEnabled))
+                }
+                saveQueueSnapshot()
+                refreshMediaButtons()
+            }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (!isPlaying) { recordIfQualified(); listening.onPaused() }
                 saveQueueSnapshot()
@@ -207,12 +234,15 @@ class PlaybackService : MediaSessionService() {
                     commands.add(saveCommand)
                     commands.add(SleepTimerCommands.SET)
                     commands.add(SleepTimerCommands.GET)
+                    commands.add(queueCommand)
                 }
                 return Futures.immediateFuture(MediaSession.ConnectionResult.AcceptedResultBuilder(mediaSession, controller)
                     .setAvailableSessionCommands(commands.build()).build())
             }
             override fun onCustomCommand(mediaSession: MediaSession, controller: MediaSession.ControllerInfo,
                  command: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
+                if (command.customAction == QueueRequest.ACTION)
+                    return Futures.immediateFuture(handleQueueCommand(controller, args))
                 if (command.customAction == SleepTimerCommands.ACTION_SET || command.customAction == SleepTimerCommands.ACTION_GET)
                     return Futures.immediateFuture(handleSleepTimerCommand(controller, command, args))
                 if (command.customAction != saveCommand.customAction) return super.onCustomCommand(mediaSession, controller, command, args)
@@ -242,7 +272,7 @@ class PlaybackService : MediaSessionService() {
             }
             override fun onAddMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo,
                                          mediaItems: List<MediaItem>): ListenableFuture<List<MediaItem>> {
-                return Futures.immediateFuture(mediaItems.map(::prepareItem))
+                return Futures.immediateFuture(mediaItems.map { prepareItem(it, fresh = true) })
             }
             override fun onSetMediaItems(mediaSession: MediaSession, controller: MediaSession.ControllerInfo,
                                          mediaItems: List<MediaItem>, startIndex: Int, startPositionMs: Long)
@@ -253,8 +283,15 @@ class PlaybackService : MediaSessionService() {
                 radioRetryAt = 0L; radioFailures = 0; earlySkips.clear()
                 activeItem = null; activeIndex = -1
                 queue.begin(mediaItems.map(::trackOf), startIndex)
+                val prepared = mediaItems.map { prepareItem(it, fresh = true) }
+                queueOrder.restore(prepared.map { it.mediaMetadata.extras!!.getString(QueueRequest.ID)!! })
+                val ordered = if (player.shuffleModeEnabled) {
+                    val entries = prepared.map { item -> QueueOccurrence(item.mediaMetadata.extras!!.getString(QueueRequest.ID)!!) }
+                    val byId = prepared.associateBy { it.mediaMetadata.extras!!.getString(QueueRequest.ID)!! }
+                    queueOrder.planned(entries, startIndex, true).map { byId.getValue(it) }
+                } else prepared
                 return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(
-                    mediaItems.map(::prepareItem), startIndex, startPositionMs))
+                    ordered, startIndex, startPositionMs))
             }
         }).build()
         publishSleepTimer()
@@ -471,19 +508,22 @@ class PlaybackService : MediaSessionService() {
      * so a restore cannot overwrite the state it is reading.
      */
     private fun saveQueueSnapshot() {
-        if (restoringQueue) return
+        if (restoringQueue || editingQueue) return
         val items = playerTimeline()
         if (items.isEmpty()) return
         val current = player.currentMediaItemIndex
         if (current < 0) return
         val position = player.currentPosition
         val seed = queue.seedTrack()
+        val occurrences = queueOccurrences()
+        val shuffled = player.shuffleModeEnabled
+        val canonicalOrder = queueOrder.canonicalOrder(occurrences)
         val revision = ++snapshotRevision
         scope.launch(Dispatchers.IO) {
             snapshotWriteMutex.lock()
             try {
                 if (revision > writtenSnapshotRevision) {
-                    queueSnapshots.save(QueueSnapshotStore.Snapshot(items, current, position, seed))
+                    queueSnapshots.save(QueueSnapshotStore.Snapshot(items, current, position, seed, occurrences, shuffled, canonicalOrder))
                     writtenSnapshotRevision = revision
                 }
             } finally {
@@ -505,8 +545,11 @@ class PlaybackService : MediaSessionService() {
         restoringQueue = true
         try {
             snapshot.items.forEach { tracksById.put(it) }
-            val items = snapshot.items.map(::mediaItemFor)
+            val items = snapshot.items.mapIndexed { index, track -> withOccurrence(mediaItemFor(track), snapshot.occurrences.getOrNull(index) ?: QueueOccurrence()) }
+            queueOrder.restore(snapshot.canonicalOrder)
             player.setMediaItems(items, snapshot.currentIndex, snapshot.positionMs)
+            player.shuffleModeEnabled = snapshot.shuffled
+            player.setShuffleOrder(queueShuffleOrder(items.size))
             player.prepare()
             queue.begin(snapshot.items, snapshot.currentIndex)
             snapshot.seed?.let { queue.setSeed(it) }
@@ -608,7 +651,8 @@ class PlaybackService : MediaSessionService() {
                 queue.completeAndAppend(request, candidates, playerTimeline(),
                     repeatOff = player.repeatMode == Player.REPEAT_MODE_OFF, continuation = page.continuation) { fresh ->
                     fresh.forEach(tracksById::put)
-                    val items = fresh.map(::mediaItemFor)
+                    val items = fresh.map { withOccurrence(mediaItemFor(it), QueueOccurrence(origin = QueueOrigin.RADIO,
+                        context = player.currentMediaItem?.mediaMetadata?.extras?.getString("queue_title"))) }
                     val ended = player.playbackState == Player.STATE_ENDED && player.playWhenReady
                     player.addMediaItems(items)
                     if (ended && items.isNotEmpty()) {
@@ -640,11 +684,58 @@ class PlaybackService : MediaSessionService() {
             metadata.durationMs ?: 0L, metadata.artworkUri?.toString())
     }
 
-    private fun prepareItem(item: MediaItem): MediaItem {
+    private fun prepareItem(item: MediaItem, fresh: Boolean = false): MediaItem {
         tracksById.put(trackOf(item))
-        return item.buildUpon().setUri(Uri.Builder().scheme("sidea-track").appendPath(item.mediaId).build())
+        val prepared = item.buildUpon().setUri(Uri.Builder().scheme("sidea-track").appendPath(item.mediaId).build())
             .setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(
                 com.mitansh.sidea.core.ArtworkUrl.forDisplay(item.mediaMetadata.artworkUri?.toString())?.let(Uri::parse)).build()).build()
+        return if (fresh || item.mediaMetadata.extras?.getString(QueueRequest.ID) == null)
+            withOccurrence(prepared, QueueOccurrence(context = item.mediaMetadata.extras?.getString("queue_title"))) else prepared
+    }
+
+    private fun withOccurrence(item: MediaItem, occurrence: QueueOccurrence): MediaItem = item.buildUpon()
+        .setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(Bundle(item.mediaMetadata.extras ?: Bundle.EMPTY).apply {
+            putString(QueueRequest.ID, occurrence.id)
+            putString(QueueRequest.ORIGIN, occurrence.origin.name)
+            occurrence.context?.let { putString("queue_title", it) }
+        }).build()).build()
+
+    private fun queueOccurrences(): List<QueueOccurrence> = (0 until player.mediaItemCount).map {
+        val extras = player.getMediaItemAt(it).mediaMetadata.extras
+        QueueOccurrence(extras?.getString(QueueRequest.ID).orEmpty(),
+            runCatching { QueueOrigin.valueOf(extras?.getString(QueueRequest.ORIGIN).orEmpty()) }.getOrDefault(QueueOrigin.CONTEXT),
+            extras?.getString("queue_title"))
+    }
+
+    private fun applyQueueOrder(ids: List<String>) {
+        editingQueue = true
+        try {
+            ids.forEachIndexed { target, id ->
+                val from = queueOccurrences().indexOfFirst { it.id == id }
+                if (from >= 0 && from != target) player.moveMediaItem(from, target)
+            }
+            player.setShuffleOrder(queueShuffleOrder(player.mediaItemCount))
+        } finally { editingQueue = false }
+        saveQueueSnapshot()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun handleQueueCommand(controller: MediaSession.ControllerInfo, args: Bundle): SessionResult {
+        val trusted = controller.isTrusted || controller.packageName == packageName
+        if (!trusted) return SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED)
+        editingQueue = true
+        val code = try {
+            when (queueCommands.dispatch(trusted, args.keySet().associateWith { args.get(it) })) {
+                QueueCommandDispatcher.Result.SUCCESS -> SessionResult.RESULT_SUCCESS
+                QueueCommandDispatcher.Result.PERMISSION_DENIED -> SessionResult.RESULT_ERROR_PERMISSION_DENIED
+                QueueCommandDispatcher.Result.BAD_VALUE -> SessionResult.RESULT_ERROR_BAD_VALUE
+                QueueCommandDispatcher.Result.STALE -> SessionResult.RESULT_ERROR_INVALID_STATE
+            }
+        } catch (_: RuntimeException) {
+            SessionResult.RESULT_ERROR_BAD_VALUE
+        } finally { editingQueue = false }
+        saveQueueSnapshot()
+        return SessionResult(code)
     }
 
     private fun mediaItemFor(track: Track): MediaItem = MediaItem.Builder().setMediaId(track.id)

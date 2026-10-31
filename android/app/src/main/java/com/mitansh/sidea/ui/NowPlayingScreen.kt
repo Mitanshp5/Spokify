@@ -50,6 +50,9 @@ fun NowPlayingScreen(
     onRetry: () -> Unit = onPlayPause,
     queueTitle: String = "Your music",
     onQueueAction: (QueueAction) -> Unit = {},
+    queueMessage: String? = null,
+    queueOpenRequest: Long = 0L,
+    onQueueOpenHandled: (Long) -> Unit = {},
     sleepTimerState: SleepTimerUiState = SleepTimerUiState(),
     onSleepTimerMinutes: (Int) -> Unit = {},
     onSleepTimerEndOfSong: () -> Unit = {},
@@ -57,6 +60,14 @@ fun NowPlayingScreen(
     onSleepTimerRefresh: () -> Unit = {},
 ) {
     var showQueue by remember { mutableStateOf(false) }
+    val queueSheetState = rememberQueueSheetState()
+    val queueModalState = rememberBottomSheetState(initialValue = SheetValue.Hidden)
+    LaunchedEffect(queueOpenRequest) {
+        if (queueOpenRequest != 0L) {
+            showQueue = true
+            onQueueOpenHandled(queueOpenRequest)
+        }
+    }
     var showActions by remember { mutableStateOf(false) }
     var showSleepTimer by rememberSaveable { mutableStateOf(false) }
     var scrubPosition by remember(trackId) { mutableStateOf<Float?>(null) }
@@ -171,12 +182,13 @@ fun NowPlayingScreen(
     if (showActions) SongOptionsSheet(track, isFavorite, onToggleFavorite, onDownload, onAddToPlaylist, onDismiss = { showActions = false })
     if (showSleepTimer) SleepTimerSheet(sleepTimerState, onSleepTimerMinutes, onSleepTimerEndOfSong,
         onSleepTimerCancel, onSleepTimerRefresh, onDismiss = { showSleepTimer = false })
-    if (showQueue) {
+    if (showQueue && !showSleepTimer) {
         QueueSheet(QueueSnapshot(queue, currentQueueIndex, shuffleEnabled), onDismiss = { showQueue = false },
-            onAction = { action ->
-                onQueueAction(action)
-                if (action is QueueAction.Select) showQueue = false
-            })
+            onAction = onQueueAction, context = queueTitle, isPlaying = isPlaying, onPlayPause = onPlayPause,
+            repeatMode = repeatMode, onShuffle = onToggleShuffle, onRepeat = onCycleRepeat,
+            timerActive = sleepTimerState.ready && sleepTimerState.status?.active == true,
+            message = queueMessage, state = queueSheetState, sheetState = queueModalState,
+            onTimer = { showSleepTimer = true; onSleepTimerRefresh() })
     }
 }
 
@@ -184,4 +196,5 @@ data class QueueEntry(
     val index: Int, val title: String, val artist: String,
     val artworkUrl: String? = null, val durationMs: Long = 0L,
     val instanceId: Any = index,
+    val origin: com.mitansh.sidea.playback.QueueOrigin = com.mitansh.sidea.playback.QueueOrigin.CONTEXT,
 )

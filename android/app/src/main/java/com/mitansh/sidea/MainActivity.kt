@@ -75,8 +75,6 @@ import com.mitansh.sidea.ui.MiniPlayer
 import com.mitansh.sidea.ui.NowPlayingScreen
 import com.mitansh.sidea.ui.QueueEntry
 import com.mitansh.sidea.ui.QueueSnapshot
-import com.mitansh.sidea.ui.QueueCommand
-import com.mitansh.sidea.ui.queueCommands
 import com.mitansh.sidea.ui.queuePlaybackIndices
 import com.mitansh.sidea.ui.RadioSettingsScreen
 import com.mitansh.sidea.ui.SpokifyNavigationBar
@@ -255,9 +253,25 @@ private fun SpokifyApp(
     val saveAction by rememberUpdatedState<(Track) -> Unit>(::saveSong)
     val manageSaveAction by rememberUpdatedState<(Track) -> Unit>(::manageSongSave)
     val savingUids = savingSongs.keys.toSet()
-    val songEnvironment = remember(playerSnapshot.current?.uid, downloads, offline, savedUids, savingUids) {
+    var queueMessage by remember { mutableStateOf<String?>(null) }
+    var queueOpenSequence by rememberSaveable { mutableLongStateOf(0L) }
+    var queueOpenRequest by rememberSaveable { mutableLongStateOf(0L) }
+    val queueConnection = remember(controller) { com.mitansh.sidea.ui.QueueConnection(controller) { notice ->
+        queueMessage = notice.message
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            val result = snackbar.showSnackbar(notice.message, actionLabel = if (notice.openQueue) "Open" else null,
+                duration = if (notice.openQueue) SnackbarDuration.Long else SnackbarDuration.Short)
+            if (notice.openQueue && result == SnackbarResult.ActionPerformed) {
+                queueOpenRequest = ++queueOpenSequence
+                expanded = true
+            }
+        }
+    } }
+    val songEnvironment = remember(playerSnapshot.current?.uid, downloads, offline, savedUids, savingUids, queueConnection) {
         SongEnvironment(playerSnapshot.current?.uid, downloads, offline::remove, offline::retry,
-            savedUids, savingUids, { saveAction(it) }, { manageSaveAction(it) })
+            savedUids, savingUids, { saveAction(it) }, { manageSaveAction(it) },
+            { queueConnection.enqueue(it, true) }, { queueConnection.enqueue(it, false) })
     }
 
     fun selectSong(tracks: List<Track>, track: Track) {
@@ -417,6 +431,9 @@ private fun SpokifyApp(
                 durationMs = playerSnapshot.durationMs,
                 queueSize = playerSnapshot.queue.size,
                 queue = displayedQueue.order,
+                queueMessage = queueMessage,
+                queueOpenRequest = queueOpenRequest,
+                onQueueOpenHandled = { request -> if (queueOpenRequest == request) queueOpenRequest = 0L },
                 currentQueueIndex = playerSnapshot.currentIndex,
                 shuffleEnabled = playerSnapshot.shuffleEnabled,
                 repeatMode = playerSnapshot.repeatMode,
@@ -436,21 +453,7 @@ private fun SpokifyApp(
                 },
                 onShowQueue = { },
                 onQueueAction = { action ->
-                    controller?.let { player ->
-                        val commands = queueCommands(displayedQueue, player.toQueueSnapshot(), action)
-                        commands.forEach { command ->
-                            when (command) {
-                                is QueueCommand.Select -> {
-                                    if (command.seek) player.seekTo(command.index, 0L)
-                                    if (player.playerError != null || player.playbackState == Player.STATE_IDLE) player.prepare()
-                                    player.play()
-                                }
-                                is QueueCommand.Remove -> player.removeMediaItem(command.index)
-                                is QueueCommand.Move -> player.moveMediaItem(command.from, command.to)
-                            }
-                        }
-                        playerSnapshot = player.toUiSnapshot()
-                    }
+                    queueConnection.edit(displayedQueue, action)
                 },
                 onClose = { expanded = false },
                 trackId = currentTrack.id,
@@ -792,7 +795,10 @@ private fun MediaController.toQueueSnapshot(): QueueSnapshot {
         timeline.getWindow(index, window)
         val metadata = window.mediaItem.mediaMetadata
         QueueEntry(index, metadata.title?.toString().orEmpty(), metadata.artist?.toString().orEmpty(),
-            metadata.artworkUri?.toString(), metadata.durationMs ?: window.durationMs.coerceAtLeast(0L), window.uid)
+            metadata.artworkUri?.toString(), metadata.durationMs ?: window.durationMs.coerceAtLeast(0L),
+            metadata.extras?.getString(com.mitansh.sidea.playback.QueueRequest.ID) ?: window.uid,
+            runCatching { com.mitansh.sidea.playback.QueueOrigin.valueOf(metadata.extras?.getString(com.mitansh.sidea.playback.QueueRequest.ORIGIN).orEmpty()) }
+                .getOrDefault(com.mitansh.sidea.playback.QueueOrigin.CONTEXT))
     }
     return QueueSnapshot(entries, currentMediaItemIndex, shuffleModeEnabled)
 }
