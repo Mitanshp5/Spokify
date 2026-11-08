@@ -614,6 +614,7 @@ private fun SpokifyApp(
                             onOpenPlaylist = { card -> selectedPlaylist = card.id; section = "playlist" },
                             activeGroupName = currentQueueTitle,
                             activeTrackUid = playerSnapshot.current?.uid,
+                            isPlaying = playerSnapshot.isPlaying,
                         )
 
                         SpokifyTab.SEARCH -> SearchScreen(

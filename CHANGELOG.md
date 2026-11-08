@@ -1,3 +1,9 @@
+# Spokify 0.3.1
+
+- Fix homepage shortcuts grid layout: combine playlists and recent songs into full 2-column pairs to eliminate missing/blank shortcut tiles.
+- Fix duplicate "Now Playing" playback indicators: when a collection (e.g. On Repeat, Liked Songs, or a playlist) is active, child song shortcuts no longer show redundant equalizer bars.
+- Equalizer bars properly pause animation when playback is paused.
+
 # Spokify 0.3.0
 
 - Slide minimized mini player horizontally to change tracks (swipe right for next song, swipe left for previous song), with fluid track offset animations.

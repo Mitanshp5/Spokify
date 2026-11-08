@@ -41,8 +41,15 @@ fun HomeScreen(
     playlists: List<PlaylistCard> = emptyList(), onOpenPlaylist: (PlaylistCard) -> Unit = {},
     activeGroupName: String? = null,
     activeTrackUid: String? = null,
+    isPlaying: Boolean = false,
 ) {
     val favoriteUids = remember(favorites) { favorites.mapTo(hashSetOf()) { it.uid } }
+    val dynamicShortcuts = remember(playlists, recentlyPlayed) {
+        buildHomeDynamicShortcuts(playlists, recentlyPlayed)
+    }
+    val activeShortcutKey = remember(activeGroupName, activeTrackUid, dynamicShortcuts) {
+        resolveActiveHomeShortcutKey(activeGroupName, activeTrackUid, dynamicShortcuts)
+    }
     LazyColumn(modifier.fillMaxSize().background(SpokifyInk), contentPadding = PaddingValues(bottom = 16.dp + LocalBottomContentPadding.current)) {
         stickyHeader(key = "filters", contentType = "filters") {
             Row(Modifier.fillMaxWidth().background(SpokifyInk).horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -55,75 +62,48 @@ fun HomeScreen(
         item(key = "shortcuts", contentType = "shortcuts") {
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        Modifier
-                            .weight(1f)
-                            .height(56.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF2A2A2A))
-                            .motionClickable(onClick = onOpenOnRepeat),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        OnRepeatArtwork(
-                            Modifier
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)),
-                            compact = true,
-                        )
-                        Text(
-                            "On Repeat",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                        if (activeGroupName == "On Repeat") {
-                            NowPlayingEqualizerBars(
-                                isPlaying = true,
-                                modifier = Modifier
-                                    .padding(end = 10.dp)
-                                    .size(width = 14.dp, height = 14.dp),
-                            )
-                        }
-                    }
                     Shortcut(
-                        "Liked Songs",
-                        Modifier.weight(1f),
+                        title = "On Repeat",
+                        modifier = Modifier.weight(1f),
+                        isPlaying = isPlaying && activeShortcutKey == "on-repeat",
+                        onClick = onOpenOnRepeat,
+                        customArtwork = {
+                            OnRepeatArtwork(
+                                Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)),
+                                compact = true,
+                            )
+                        },
+                    )
+                    Shortcut(
+                        title = "Liked Songs",
+                        modifier = Modifier.weight(1f),
                         icon = R.drawable.ic_favorite,
-                        isPlaying = activeGroupName == "Liked Songs",
+                        isPlaying = isPlaying && activeShortcutKey == "liked-songs",
                         onClick = onOpenFavorites,
                     )
                 }
-                playlists.take(4).chunked(2).forEach { pair ->
+                dynamicShortcuts.chunked(2).forEach { pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pair.forEach { playlist ->
-                            Shortcut(
-                                playlist.name,
-                                Modifier.weight(1f),
-                                artwork = playlist.artworkUrl,
-                                isPlaying = activeGroupName == playlist.name,
-                                onClick = { onOpenPlaylist(playlist) },
-                            )
+                        pair.forEach { item ->
+                            when (item) {
+                                is HomeShortcutItem.Playlist -> Shortcut(
+                                    title = item.card.name,
+                                    modifier = Modifier.weight(1f),
+                                    artwork = item.card.artworkUrl,
+                                    isPlaying = isPlaying && activeShortcutKey == "playlist:${item.card.id}",
+                                    onClick = { onOpenPlaylist(item.card) },
+                                )
+                                is HomeShortcutItem.Song -> Shortcut(
+                                    title = item.track.title,
+                                    modifier = Modifier.weight(1f),
+                                    artwork = item.track.artworkUrl,
+                                    isPlaying = isPlaying && activeShortcutKey == "track:${item.track.uid}",
+                                    onClick = { onPlay(item.track) },
+                                )
+                            }
                         }
-                        if (pair.size == 1) Spacer(Modifier.weight(1f))
-                    }
-                }
-                recentlyPlayed.take(if (playlists.isEmpty()) 4 else 2).chunked(2).forEach { pair ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pair.forEach { track ->
-                            Shortcut(
-                                track.title,
-                                Modifier.weight(1f),
-                                artwork = track.artworkUrl,
-                                isPlaying = activeTrackUid == track.uid,
-                                onClick = { onPlay(track) },
-                            )
-                        }
-                        if (pair.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
             }
@@ -201,6 +181,7 @@ private fun Shortcut(
     artwork: String? = null,
     isPlaying: Boolean = false,
     onClick: () -> Unit,
+    customArtwork: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier
@@ -210,24 +191,28 @@ private fun Shortcut(
             .motionClickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (icon != null) {
-            Box(
-                Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
-                    .background(Brush.linearGradient(if (icon == R.drawable.ic_favorite) listOf(Color(0xFF4824B8), Color(0xFFAFD9CF)) else listOf(Color(0xFF16634F), Color(0xFF213B31)))),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(painterResource(icon), null, Modifier.size(24.dp), tint = Color.White)
+        when {
+            customArtwork != null -> customArtwork()
+            icon != null -> {
+                Box(
+                    Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+                        .background(Brush.linearGradient(if (icon == R.drawable.ic_favorite) listOf(Color(0xFF4824B8), Color(0xFFAFD9CF)) else listOf(Color(0xFF16634F), Color(0xFF213B31)))),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(painterResource(icon), null, Modifier.size(24.dp), tint = Color.White)
+                }
             }
-        } else {
-            Artwork(
-                artwork,
-                null,
-                Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)),
-            )
+            else -> {
+                Artwork(
+                    artwork,
+                    null,
+                    Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)),
+                )
+            }
         }
         Text(
             title,
@@ -250,3 +235,4 @@ private fun Shortcut(
         }
     }
 }
+
