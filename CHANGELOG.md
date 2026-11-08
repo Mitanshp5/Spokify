@@ -1,3 +1,7 @@
+# Spokify 0.3.3
+
+- Rename top filter pill on Home screen from "Podcasts" to "Downloads" to directly reflect its navigation to the Offline Backup screen.
+
 # Spokify 0.3.2
 
 - Refine Mini Player swipe gestures: swiping right reliably advances to the next track in the queue (handling Repeat-One and end-of-queue wrapping without repeating the same song).
