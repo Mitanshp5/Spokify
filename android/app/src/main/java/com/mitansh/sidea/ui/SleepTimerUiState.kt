@@ -1,6 +1,6 @@
 package com.mitansh.sidea.ui
 
-internal val sleepTimerPresets = listOf(15, 30, 45, 60)
+internal val sleepTimerPresets = listOf(5, 10, 15, 30, 45, 60)
 internal fun sleepTimerCustomMinutes(input: String): Int? =
     input.takeIf { it.isNotEmpty() && it.all { char -> char in '0'..'9' } }
         ?.toIntOrNull()?.takeIf { it in 1..180 }

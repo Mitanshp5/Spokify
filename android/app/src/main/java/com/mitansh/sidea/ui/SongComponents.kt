@@ -3,7 +3,10 @@ package com.mitansh.sidea.ui
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.background
@@ -18,6 +21,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -26,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.mitansh.sidea.R
 import com.mitansh.sidea.core.Track
 import com.mitansh.sidea.data.offline.OfflineItem
@@ -237,18 +243,102 @@ fun SongList(
 }
 
 @Composable
-fun MiniPlayer(title: String, artist: String, artworkUrl: String?, isPlaying: Boolean, progress: Float, onPlayPause: () -> Unit, onOpen: () -> Unit, modifier: Modifier = Modifier, trackId: String = "", song: Track? = null) {
+fun MiniPlayer(
+    title: String,
+    artist: String,
+    artworkUrl: String?,
+    isPlaying: Boolean,
+    progress: Float,
+    onPlayPause: () -> Unit,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+    trackId: String = "",
+    song: Track? = null,
+    onNext: () -> Unit = {},
+    onPrevious: () -> Unit = {},
+) {
     var artworkColor by remember(artworkUrl) { mutableStateOf(Color(0xFF263A33)) }
     val background by animateColorAsState(artworkColor, motionTween(500), label = "mini artwork colour")
-    Column(modifier.padding(horizontal = 8.dp, vertical = 4.dp).fillMaxWidth().height(62.dp).clip(RoundedCornerShape(8.dp)).background(background).motionClickable(onClick = onOpen)) {
-        Row(Modifier.fillMaxWidth().weight(1f).padding(start = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            PlayerArtwork(trackId, artworkUrl, null, Modifier.size(42.dp).clip(RoundedCornerShape(4.dp)), onColor = { artworkColor = it }, sizePx = 256)
-            Crossfade(title to artist, modifier = Modifier.weight(1f).padding(horizontal = 12.dp), animationSpec = motionTween(180), label = "mini song") { details ->
-                Column {
-                    Text(details.first, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-                        overflow = if (LocalMotionEnabled.current) TextOverflow.Clip else TextOverflow.Ellipsis,
-                        modifier = if (LocalMotionEnabled.current) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1600) else Modifier)
-                    Text(details.second, color = Color(0xFFD5DFD9), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+    val scope = rememberCoroutineScope()
+    val offsetX = remember { Animatable(0f) }
+    var dragDistance by remember { mutableFloatStateOf(0f) }
+    var cardWidthPx by remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
+    val swipeThreshold = with(density) { 48.dp.toPx() }
+
+    LaunchedEffect(trackId) {
+        if (offsetX.value != 0f) {
+            offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+        }
+    }
+
+    Column(
+        modifier
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .fillMaxWidth()
+            .height(62.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(background)
+            .onSizeChanged { cardWidthPx = it.width.toFloat() }
+            .draggable(
+                orientation = Orientation.Horizontal,
+                state = rememberDraggableState { delta ->
+                    dragDistance += delta
+                    scope.launch { offsetX.snapTo(dragDistance) }
+                },
+                onDragStarted = {
+                    dragDistance = 0f
+                },
+                onDragStopped = { velocity ->
+                    val threshold = swipeThreshold
+                    val width = if (cardWidthPx > 0f) cardWidthPx else 800f
+                    // Swipe left for previous song, swipe right for next song
+                    if (dragDistance < -threshold || velocity < -400f) {
+                        scope.launch {
+                            offsetX.animateTo(-width, tween(140, easing = FastOutLinearInEasing))
+                            onPrevious()
+                            offsetX.snapTo(width)
+                            offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+                        }
+                    } else if (dragDistance > threshold || velocity > 400f) {
+                        scope.launch {
+                            offsetX.animateTo(width, tween(140, easing = FastOutLinearInEasing))
+                            onNext()
+                            offsetX.snapTo(-width)
+                            offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+                        }
+                    } else {
+                        scope.launch {
+                            offsetX.animateTo(0f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow))
+                        }
+                    }
+                    dragDistance = 0f
+                }
+            )
+            .motionClickable(onClick = onOpen)
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(start = 8.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .graphicsLayer { translationX = offsetX.value },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PlayerArtwork(trackId, artworkUrl, null, Modifier.size(42.dp).clip(RoundedCornerShape(4.dp)), onColor = { artworkColor = it }, sizePx = 256)
+                Crossfade(title to artist, modifier = Modifier.weight(1f).padding(horizontal = 12.dp), animationSpec = motionTween(180), label = "mini song") { details ->
+                    Column {
+                        Text(details.first, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                            overflow = if (LocalMotionEnabled.current) TextOverflow.Clip else TextOverflow.Ellipsis,
+                            modifier = if (LocalMotionEnabled.current) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1600) else Modifier)
+                        Text(details.second, color = Color(0xFFD5DFD9), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
             SongSaveButton(song ?: Track(trackId, title, artist, artworkUrl = artworkUrl))

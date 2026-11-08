@@ -89,9 +89,6 @@ fun NowPlayingScreen(
                     Text("Playing from", color = Color.White, fontSize = 11.sp)
                     Text(queueTitle, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                TextButton(onClick = { showQueue = true; onShowQueue() }, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text("Queue", color = Color.White, fontWeight = FontWeight.Bold)
-                }
                 MotionIconButton(onClick = { showActions = true }) { Icon(painterResource(R.drawable.ic_more), "More song options", tint = Color.White) }
             }
             Spacer(Modifier.height(12.dp))
@@ -135,29 +132,20 @@ fun NowPlayingScreen(
                     DownloadAction(download, title) { if (download == null) onDownload() else showActions = true }
                     if (download != null) Text(downloadLabel(download), color = if (download.isComplete) SpokifyGreen else SpokifyMuted, fontSize = 11.sp)
                 }
-                Row {
-                    TextButton(onClick = { showSleepTimer = true; onSleepTimerRefresh() }, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text("Sleep timer", color = if (sleepTimerState.ready && sleepTimerState.status?.active == true) SpokifyGreen else Color.White)
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     MotionIconButton(onClick = {
                         context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
                             .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, "$title — $artist\nhttps://music.youtube.com/watch?v=$trackId"), "Share song"))
                     }) { Icon(painterResource(R.drawable.ic_share), "Share song", tint = Color.White) }
+                    MotionIconButton(onClick = { showQueue = true; onShowQueue() }) {
+                        Icon(painterResource(R.drawable.ic_queue), "Queue", tint = Color.White)
+                    }
                 }
             }
             error?.let {
                 Text(it, color = SpokifyError, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                 TextButton(onClick = onRetry) { Text("Retry playback", color = SpokifyGreen) }
             }
-            Text(
-                when {
-                    sleepTimerState.pending -> "Updating sleep timer…"
-                    !sleepTimerState.ready && sleepTimerState.error != null -> "Sleep timer unavailable · Tap Sleep timer"
-                    else -> sleepTimerState.summary
-                },
-                color = if (sleepTimerState.ready && sleepTimerState.status?.active == true) SpokifyGreen else SpokifyMuted,
-                fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp),
-            )
             Spacer(Modifier.height(20.dp))
             LyricsCard(track, positionMs, onSeek, isPlaying, onPlayPause, background = lerp(backgroundColor, Color(0xFF842343), .5f))
             Spacer(Modifier.height(24.dp))
@@ -171,7 +159,9 @@ fun NowPlayingScreen(
                         Text(artist, color = SpokifyMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     SongSaveButton(track, isFavorite, onToggleFavorite)
-                    TextButton(onClick = { showQueue = true; onShowQueue() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Queue", color = Color.White) }
+                    MotionIconButton(onClick = { showQueue = true; onShowQueue() }) {
+                        Icon(painterResource(R.drawable.ic_queue), "Queue", tint = Color.White)
+                    }
                     MotionIconButton(onClick = onPlayPause) { PlayPauseIcon(isPlaying) }
                 }
                 LinearProgressIndicator(progress = { if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f },
@@ -179,10 +169,16 @@ fun NowPlayingScreen(
             }
         }
     }
-    if (showActions) SongOptionsSheet(track, isFavorite, onToggleFavorite, onDownload, onAddToPlaylist, onDismiss = { showActions = false })
+    if (showActions) SongOptionsSheet(track, isFavorite, onToggleFavorite, onDownload, onAddToPlaylist, onDismiss = { showActions = false },
+        extraActions = {
+            SheetAction("Sleep timer", R.drawable.ic_timer) {
+                showSleepTimer = true
+                onSleepTimerRefresh()
+            }
+        })
     if (showSleepTimer) SleepTimerSheet(sleepTimerState, onSleepTimerMinutes, onSleepTimerEndOfSong,
         onSleepTimerCancel, onSleepTimerRefresh, onDismiss = { showSleepTimer = false })
-    if (showQueue && !showSleepTimer) {
+    if (showQueue) {
         QueueSheet(QueueSnapshot(queue, currentQueueIndex, shuffleEnabled), onDismiss = { showQueue = false },
             onAction = onQueueAction, context = queueTitle, isPlaying = isPlaying, onPlayPause = onPlayPause,
             repeatMode = repeatMode, onShuffle = onToggleShuffle, onRepeat = onCycleRepeat,

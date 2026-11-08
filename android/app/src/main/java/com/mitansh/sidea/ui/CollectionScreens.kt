@@ -22,11 +22,114 @@ import com.mitansh.sidea.core.Track
 import com.mitansh.sidea.data.library.PlaylistTrackEntry
 
 @Composable
-fun CollectionScreen(title: String, onBack: () -> Unit, songs: List<Track>, favorites: List<Track>, onPlay: (Track) -> Unit, onFavorite: (Track) -> Unit, onDownload: (Track) -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxSize()) {
-        ScreenHeader(title, onBack)
-        Text("${songs.size} songs", color = SpokifyMuted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
-        SongList(songs, favorites, onPlay, onFavorite, onDownload = onDownload, modifier = Modifier.weight(1f), emptyMessage = "Nothing here yet.")
+fun CollectionScreen(
+    title: String,
+    onBack: () -> Unit,
+    songs: List<Track>,
+    favorites: List<Track>,
+    onPlay: (Track) -> Unit,
+    onFavorite: (Track) -> Unit,
+    onDownload: (Track) -> Unit,
+    modifier: Modifier = Modifier,
+    onPlayAll: (() -> Unit)? = null,
+    onShuffle: (() -> Unit)? = null,
+    onDownloadAll: (() -> Unit)? = null,
+) {
+    val isLiked = title == "Liked Songs"
+    val gradientColors = if (isLiked) {
+        listOf(Color(0xFF2E1C60), SpokifyInk)
+    } else {
+        listOf(Color(0xFF343744), SpokifyInk)
+    }
+    val favoriteUids = remember(favorites) { favorites.mapTo(hashSetOf()) { it.uid } }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(gradientColors, endY = 850f)),
+        contentPadding = PaddingValues(bottom = 20.dp + LocalBottomContentPadding.current),
+    ) {
+        item(key = "collection-header") {
+            ScreenHeader("", onBack)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text(
+                    text = "${songs.size} songs",
+                    color = SpokifyMuted,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                if (songs.isNotEmpty()) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (onDownloadAll != null) {
+                            val downloads = LocalSongEnvironment.current.downloads
+                            val ready = songs.count { downloads[it.id]?.isComplete == true }
+                            val isAllDownloaded = ready == songs.size
+                            IconButton(onClick = onDownloadAll) {
+                                Icon(
+                                    painterResource(if (isAllDownloaded) R.drawable.ic_downloaded else R.drawable.ic_download),
+                                    "Download all",
+                                    tint = if (isAllDownloaded) SpokifyGreen else Color.White,
+                                )
+                            }
+                        }
+                        if (onShuffle != null) {
+                            IconButton(onClick = onShuffle) {
+                                Icon(
+                                    painterResource(R.drawable.ic_shuffle),
+                                    "Shuffle",
+                                    tint = Color.White,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        if (onPlayAll != null) {
+                            MotionFilledIconButton(
+                                onClick = onPlayAll,
+                                modifier = Modifier.size(56.dp),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = SpokifyGreen,
+                                    contentColor = Color.Black,
+                                ),
+                            ) {
+                                Icon(painterResource(R.drawable.ic_play), "Play all", Modifier.size(28.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (songs.isEmpty()) {
+            item {
+                Text("Nothing here yet.", color = SpokifyMuted, modifier = Modifier.padding(24.dp))
+            }
+        }
+        items(songs, key = { it.uid }, contentType = { "song" }) { track ->
+            SongRow(
+                track = track,
+                isFavorite = track.uid in favoriteUids,
+                onPlay = { onPlay(track) },
+                onFavorite = { onFavorite(track) },
+                onDownload = { onDownload(track) },
+                modifier = Modifier.animateItem(),
+                showUnsavedSave = true,
+            )
+        }
     }
 }
 
@@ -37,6 +140,7 @@ fun PlaylistScreen(
     onRemove: (PlaylistTrackEntry) -> Unit, onMove: (PlaylistTrackEntry, Boolean) -> Unit,
     onDownloadAll: (List<Track>) -> Unit = {}, onRename: () -> Unit, onDelete: () -> Unit,
     onPlayAll: () -> Unit = {},
+    onShuffle: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -57,11 +161,23 @@ fun PlaylistScreen(
                 Text(name, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 24.dp))
                 Text("${entries.size} songs · Spokify", color = SpokifyMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
                 Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { onDownloadAll(entries.map { it.track }) }, enabled = entries.isNotEmpty()) {
-                        Icon(painterResource(R.drawable.ic_download), null, Modifier.size(22.dp)); Spacer(Modifier.width(8.dp)); Text("Download playlist")
+                    val downloads = LocalSongEnvironment.current.downloads
+                    val ready = entries.count { downloads[it.track.id]?.isComplete == true }
+                    val isAllDownloaded = entries.isNotEmpty() && ready == entries.size
+                    IconButton(onClick = { onDownloadAll(entries.map { it.track }) }, enabled = entries.isNotEmpty()) {
+                        Icon(
+                            painterResource(if (isAllDownloaded) R.drawable.ic_downloaded else R.drawable.ic_download),
+                            "Download playlist",
+                            tint = if (isAllDownloaded) SpokifyGreen else Color.White,
+                        )
+                    }
+                    if (onShuffle != null) {
+                        IconButton(onClick = onShuffle, enabled = entries.isNotEmpty()) {
+                            Icon(painterResource(R.drawable.ic_shuffle), "Shuffle playlist", tint = Color.White)
+                        }
                     }
                     Spacer(Modifier.weight(1f))
-                    MotionFilledIconButton(onClick = onPlayAll, enabled = entries.isNotEmpty(), modifier = Modifier.size(56.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = SpokifyGreen, contentColor = Color.Black)) { Icon(painterResource(R.drawable.ic_play), "Play playlist", Modifier.size(26.dp)) }
+                    MotionFilledIconButton(onClick = onPlayAll, enabled = entries.isNotEmpty(), modifier = Modifier.size(56.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = SpokifyGreen, contentColor = Color.Black)) { Icon(painterResource(R.drawable.ic_play), "Play playlist", Modifier.size(28.dp)) }
                 }
             }
         }

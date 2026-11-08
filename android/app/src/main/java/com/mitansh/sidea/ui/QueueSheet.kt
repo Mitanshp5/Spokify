@@ -1,12 +1,16 @@
 package com.mitansh.sidea.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,24 +19,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.media3.common.Player
 import com.mitansh.sidea.R
 import com.mitansh.sidea.playback.QueueOrigin
@@ -51,6 +57,103 @@ class QueueSheetState(val scroll: LazyListState) {
 fun rememberQueueSheetState(): QueueSheetState {
     val scroll = rememberLazyListState()
     return remember(scroll) { QueueSheetState(scroll) }
+}
+
+@Composable
+fun NowPlayingEqualizerBars(
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+    color: Color = SpokifyGreen
+) {
+    if (!isPlaying) return
+    val infiniteTransition = rememberInfiniteTransition(label = "equalizer")
+    val h1 by infiniteTransition.animateFloat(
+        initialValue = 0.35f, targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(450, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ), label = "h1"
+    )
+    val h2 by infiniteTransition.animateFloat(
+        initialValue = 0.85f, targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(550, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ), label = "h2"
+    )
+    val h3 by infiniteTransition.animateFloat(
+        initialValue = 0.45f, targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(380, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ), label = "h3"
+    )
+    Row(
+        modifier = modifier.size(width = 13.dp, height = 13.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        listOf(h1, h2, h3).forEach { heightFraction ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(heightFraction)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(color)
+            )
+        }
+    }
+}
+
+@Composable
+fun QueueModeTile(
+    selected: Boolean,
+    icon: Int,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    badge: String? = null
+) {
+    val tint by animateColorAsState(if (selected) SpokifyGreen else Color.White, motionTween(160), label = "tile tint")
+    Box(
+        modifier = modifier
+            .height(60.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF282828))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    painter = painterResource(icon),
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(22.dp)
+                )
+                badge?.let {
+                    Text(
+                        it,
+                        color = tint,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.semantics { hideFromAccessibility() }
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                label,
+                color = tint,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -86,34 +189,74 @@ fun QueueSheet(
         val density = LocalDensity.current
         val windowHeight = LocalWindowInfo.current.containerSize.height
         val heightPx = with(density) { maxHeight.toPx() }
-        // Material's partial anchor still measures full-height content. Its actual window
-        // position includes the drag handle/insets; reserve only the obscured portion so
-        // header/current/footer stay visible while the native sheet expands and scrolls.
         val visibleBottom = windowHeight - WindowInsets.navigationBars.getBottom(density)
         val obscured = (contentTop + heightPx - visibleBottom).coerceIn(0f, heightPx)
         Column(Modifier.fillMaxSize().padding(bottom = with(density) { obscured.toDp() })) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(if (editing) "Edit queue" else "Queue", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    if (!editing) Text("Playing $context", color = SpokifyMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (!editing) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Playing ", color = SpokifyMuted, fontSize = 13.sp)
+                            Text(
+                                presentation.current?.title ?: context,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
-                if (editing) IconButton(onClick = { editing = false; selected = emptySet() }, modifier = Modifier.size(48.dp)) {
-                    Icon(painterResource(R.drawable.ic_close), "Close edit queue", tint = Color.White)
+                if (editing) {
+                    IconButton(onClick = { editing = false; selected = emptySet() }, modifier = Modifier.size(40.dp)) {
+                        Icon(painterResource(R.drawable.ic_close), "Close edit queue", tint = Color.White)
+                    }
                 } else {
-                    if (presentation.upcoming.any { it.origin == QueueOrigin.MANUAL })
-                        TextButton(onClick = { onAction(QueueAction.ClearManual) }, modifier = Modifier.heightIn(min = 48.dp)
-                            .semantics { contentDescription = "Clear manual queue" }) { Text("Clear") }
-                    FilledTonalButton(onClick = { editing = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Edit") }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (presentation.upcoming.any { it.origin == QueueOrigin.MANUAL }) {
+                            TextButton(
+                                onClick = { onAction(QueueAction.ClearManual) },
+                                modifier = Modifier.heightIn(min = 36.dp).semantics { contentDescription = "Clear manual queue" }
+                            ) { Text("Clear", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0xFF282828))
+                                .clickable { editing = true }
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Edit", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
             presentation.current?.let { current ->
-                    QueueSong(current, true, onClick = { onAction(QueueAction.Select(current)) }, trailing = {
-                        MotionIconButton(onClick = onPlayPause) { PlayPauseIcon(isPlaying, Modifier.size(28.dp)) }
-                    })
-                    HorizontalDivider(color = Color.White.copy(alpha = .08f))
+                QueueSong(current, true, isPlaying = isPlaying, onClick = { onAction(QueueAction.Select(current)) }, trailing = {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .clickable(onClick = onPlayPause)
+                            .semantics { contentDescription = if (isPlaying) "Pause" else "Play" },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
+                            contentDescription = null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                })
+                HorizontalDivider(color = Color.White.copy(alpha = .08f))
             }
             LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("queue-list"), state = scroll,
-                contentPadding = PaddingValues(vertical = 8.dp)) {
+                contentPadding = PaddingValues(vertical = 4.dp)) {
                 if (presentation.current == null) item { QueueSection("Your queue is empty") }
                 else if (presentation.upcoming.isEmpty()) item { QueueSection("You're at the end of the queue") }
                 itemsIndexed(presentation.upcoming, key = { _, entry -> rowKeys.key(entry.instanceId) }) { position, entry ->
@@ -121,7 +264,7 @@ fun QueueSheet(
                         QueueSection(when (entry.origin) {
                             QueueOrigin.MANUAL -> "Next in queue"
                             QueueOrigin.CONTEXT -> "Next from $context"
-                            QueueOrigin.RADIO -> "Recommended"
+                            QueueOrigin.RADIO -> "Next up: Recommended tracks"
                         })
                     }
                     fun move(up: Boolean) { onAction(QueueAction.Move(entry, up)) }
@@ -130,17 +273,25 @@ fun QueueSheet(
                     var drag by remember(entry.instanceId) { mutableFloatStateOf(0f) }
                     var rowHeight by remember(entry.instanceId) { mutableFloatStateOf(0f) }
                     LaunchedEffect(snapshot) { drag = 0f }
-                    QueueSong(entry, false, onClick = {
+                    QueueSong(entry, false, isPlaying = false, onClick = {
                         if (editing) selected = if (entry.instanceId in validSelection) validSelection - entry.instanceId else validSelection + entry.instanceId
                         else onAction(QueueAction.Select(entry))
                     }, leading = {
-                        if (editing) Checkbox(entry.instanceId in validSelection, onCheckedChange = { checked ->
-                            selected = if (checked) validSelection + entry.instanceId else validSelection - entry.instanceId
-                        }, modifier = Modifier.size(48.dp).semantics { contentDescription = "Select ${entry.title}, queue position ${entry.index + 1}" })
+                        if (editing) Checkbox(
+                            checked = entry.instanceId in validSelection,
+                            onCheckedChange = { checked ->
+                                selected = if (checked) validSelection + entry.instanceId else validSelection - entry.instanceId
+                            },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = SpokifyGreen,
+                                uncheckedColor = Color(0xFF777777),
+                                checkmarkColor = Color.Black
+                            ),
+                            modifier = Modifier.size(44.dp).semantics { contentDescription = "Select ${entry.title}, queue position ${entry.index + 1}" }
+                        )
                     }, trailing = {
                         val density = LocalDensity.current
                         val threshold = rowHeight.takeIf { it > 0f } ?: with(density) { 72.dp.toPx() }
-                        // Commit once on drop; cancellation/mutation never leaves a half-applied move.
                         Box(Modifier.size(48.dp).semantics {
                             contentDescription = "Reorder ${entry.title}, queue position ${entry.index + 1}"
                             customActions = buildList {
@@ -163,7 +314,14 @@ fun QueueSheet(
                                 if (row != null && (row.offset + drag + row.size > info.viewportEndOffset - threshold || row.offset + drag < info.viewportStartOffset + threshold))
                                     scope.launch { scroll.scroll { drag += scrollBy(amount.y) } }
                             }
-                        }, contentAlignment = Alignment.Center) { Text("≡", color = Color.White, fontSize = 28.sp) }
+                        }, contentAlignment = Alignment.Center) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_drag_handle),
+                                contentDescription = null,
+                                tint = SpokifyMuted,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }, modifier = Modifier.zIndex(if (drag != 0f) 1f else 0f).graphicsLayer { translationY = drag }
                         .onSizeChanged { rowHeight = it.height.toFloat() }.semantics {
                         customActions = buildList {
@@ -178,35 +336,80 @@ fun QueueSheet(
                 .semantics { liveRegion = LiveRegionMode.Polite }) }
             if (editing) {
                 val entries = presentation.upcoming.filter { it.instanceId in validSelection }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(enabled = entries.any { entry ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val canMoveUp = entries.any { entry ->
                         val index = presentation.upcoming.indexOf(entry)
                         index > 0 && presentation.upcoming[index - 1].origin == entry.origin && presentation.upcoming[index - 1].instanceId !in validSelection
-                    }, onClick = {
-                        // Move each selected block over its preceding unselected occurrence.
-                        // Reusing that identity preserves the selected block's internal order.
-                        entries.forEach { entry ->
-                            val index = presentation.upcoming.indexOf(entry)
-                            val target = presentation.upcoming.take(index).lastOrNull { it.instanceId !in validSelection }
-                            if (target != null && target.origin == entry.origin) onAction(QueueAction.MoveTo(entry, target))
-                        }
-                    }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Move up") }
-                    TextButton(enabled = entries.isNotEmpty(), onClick = { onAction(QueueAction.RemoveSelected(entries)); selected = emptySet() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Remove") }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(if (canMoveUp) Color(0xFF282828) else Color(0xFF1E1E1E))
+                            .clickable(enabled = canMoveUp) {
+                                entries.forEach { entry ->
+                                    val index = presentation.upcoming.indexOf(entry)
+                                    val target = presentation.upcoming.take(index).lastOrNull { it.instanceId !in validSelection }
+                                    if (target != null && target.origin == entry.origin) onAction(QueueAction.MoveTo(entry, target))
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Move up", color = if (canMoveUp) Color.White else Color(0xFF555555), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    val canRemove = entries.isNotEmpty()
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(if (canRemove) Color(0xFF282828) else Color(0xFF1E1E1E))
+                            .clickable(enabled = canRemove) {
+                                onAction(QueueAction.RemoveSelected(entries))
+                                selected = emptySet()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Remove", color = if (canRemove) Color.White else Color(0xFF555555), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-                TextButton(enabled = presentation.upcoming.isNotEmpty(), onClick = { onAction(QueueAction.ClearUpcoming); selected = emptySet() }, modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = 16.dp)) { Text("Clear upcoming") }
-            } else Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    PlaybackModeButton(snapshot.shuffled, R.drawable.ic_shuffle, "Shuffle", onShuffle)
-                    Text("Shuffle", color = if (snapshot.shuffled) SpokifyGreen else SpokifyMuted)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    PlaybackModeButton(repeatMode != Player.REPEAT_MODE_OFF, R.drawable.ic_repeat, "Repeat", onRepeat,
-                        badge = if (repeatMode == Player.REPEAT_MODE_ONE) "1" else null)
-                    Text("Repeat", color = if (repeatMode != Player.REPEAT_MODE_OFF) SpokifyGreen else SpokifyMuted)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    PlaybackModeButton(timerActive, R.drawable.ic_timer, "Timer", onTimer)
-                    Text("Timer", color = if (timerActive) SpokifyGreen else SpokifyMuted)
+            } else {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    QueueModeTile(
+                        selected = snapshot.shuffled,
+                        icon = R.drawable.ic_shuffle,
+                        label = "Shuffle",
+                        onClick = onShuffle,
+                        modifier = Modifier.weight(1f)
+                    )
+                    QueueModeTile(
+                        selected = repeatMode != Player.REPEAT_MODE_OFF,
+                        icon = R.drawable.ic_repeat,
+                        label = "Repeat",
+                        onClick = onRepeat,
+                        modifier = Modifier.weight(1f),
+                        badge = if (repeatMode == Player.REPEAT_MODE_ONE) "1" else null
+                    )
+                    QueueModeTile(
+                        selected = timerActive,
+                        icon = R.drawable.ic_timer,
+                        label = "Timer",
+                        onClick = onTimer,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
             Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.navigationBars))
@@ -217,22 +420,40 @@ fun QueueSheet(
 
 @Composable
 private fun QueueSection(label: String) {
-    Text(label, color = SpokifyMuted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+    Text(label, color = SpokifyMuted, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
 }
 
 @Composable
-private fun QueueSong(entry: QueueEntry, current: Boolean, modifier: Modifier = Modifier,
+private fun QueueSong(
+    entry: QueueEntry,
+    current: Boolean,
+    isPlaying: Boolean = false,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
-    leading: @Composable () -> Unit = {}, trailing: @Composable () -> Unit) {
+    leading: @Composable () -> Unit = {},
+    trailing: @Composable () -> Unit
+) {
     Row(modifier.fillMaxWidth().testTag("queue-row-${entry.index}").motionClickable(onClick = onClick)
         .semantics { contentDescription = "${if (current) "Resume" else "Play"} ${entry.title}, queue position ${entry.index + 1}" }
-        .heightIn(min = 72.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+        .heightIn(min = 68.dp).padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         leading()
         Artwork(entry.artworkUrl, null, Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)))
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Text(entry.title, color = if (current) SpokifyGreen else Color.White, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(entry.artist, color = SpokifyMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (current && isPlaying) {
+                    NowPlayingEqualizerBars(isPlaying = true, modifier = Modifier.padding(end = 6.dp))
+                }
+                Text(
+                    entry.title,
+                    color = if (current) SpokifyGreen else Color.White,
+                    fontWeight = if (current) FontWeight.Bold else FontWeight.Medium,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(entry.artist, color = SpokifyMuted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         trailing()
     }

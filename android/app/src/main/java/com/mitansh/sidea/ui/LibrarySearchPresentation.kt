@@ -2,6 +2,13 @@ package com.mitansh.sidea.ui
 
 internal enum class LibrarySearchEmptyKind { NONE, NO_RESULTS }
 
+enum class LibrarySortOption(val displayName: String) {
+    RECENTS("Recents"),
+    RECENTLY_ADDED("Recently added"),
+    ALPHABETICAL("Alphabetical"),
+    CREATOR("Creator")
+}
+
 internal fun librarySearchBackEnabled(searching: Boolean, query: String, playerVisible: Boolean): Boolean =
     !playerVisible && (searching || query.isNotEmpty())
 
@@ -15,12 +22,18 @@ internal data class LibrarySearchPresentation(
 ) {
     companion object {
         fun from(
-            playlists: List<PlaylistCard>, query: String, nameSort: Boolean, playlistOnly: Boolean,
+            playlists: List<PlaylistCard>,
+            query: String,
+            sortOption: LibrarySortOption = LibrarySortOption.RECENTS,
+            playlistOnly: Boolean = false,
         ): LibrarySearchPresentation {
             val searchTerm = query.trim()
-            val visible = playlists.filter { it.name.contains(searchTerm, true) }.let { rows ->
-                if (nameSort) rows.sortedBy { it.name.lowercase() }
-                else rows.sortedByDescending { it.createdAtEpochMs }
+            val filtered = playlists.filter { it.name.contains(searchTerm, true) }
+            val visible = when (sortOption) {
+                LibrarySortOption.ALPHABETICAL -> filtered.sortedBy { it.name.lowercase() }
+                LibrarySortOption.CREATOR -> filtered.sortedBy { it.name.lowercase() }
+                LibrarySortOption.RECENTLY_ADDED,
+                LibrarySortOption.RECENTS -> filtered.sortedByDescending { it.createdAtEpochMs }
             }
             val result = LibrarySearchPresentation(
                 visible,
@@ -34,5 +47,17 @@ internal data class LibrarySearchPresentation(
                 !result.showOfflineBackup && !result.showRecentlyPlayed
             ) result.copy(emptyKind = LibrarySearchEmptyKind.NO_RESULTS) else result
         }
+
+        fun from(
+            playlists: List<PlaylistCard>,
+            query: String,
+            nameSort: Boolean,
+            playlistOnly: Boolean,
+        ): LibrarySearchPresentation = from(
+            playlists,
+            query,
+            if (nameSort) LibrarySortOption.ALPHABETICAL else LibrarySortOption.RECENTLY_ADDED,
+            playlistOnly,
+        )
     }
 }

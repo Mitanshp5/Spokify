@@ -185,6 +185,7 @@ private fun SpokifyApp(
 
     val search by searches.state.collectAsStateWithLifecycle()
     var playerSnapshot by remember(controller) { mutableStateOf(controller.toUiSnapshot()) }
+    val currentQueueTitle = playerSnapshot.queue.getOrNull(playerSnapshot.currentIndex)?.mediaMetadata?.extras?.getString("queue_title")
     val sleepTimer = rememberSleepTimer(controller)
     var handledNotificationOpen by rememberSaveable { mutableLongStateOf(0L) }
     LaunchedEffect(notificationOpen, playerSnapshot.current?.uid) {
@@ -387,7 +388,7 @@ private fun SpokifyApp(
                 title = currentTrack.title,
                 artist = currentTrack.artist,
                 artworkUrl = currentTrack.artworkUrl,
-                queueTitle = playerSnapshot.queue.getOrNull(playerSnapshot.currentIndex)?.mediaMetadata?.extras?.getString("queue_title") ?: "Your music",
+                queueTitle = currentQueueTitle ?: "Your music",
                 isPlaying = playerSnapshot.isPlaying,
                 isBuffering = playerSnapshot.isBuffering,
                 sleepTimerState = sleepTimer.state,
@@ -454,6 +455,8 @@ private fun SpokifyApp(
                     },
                     onPlayPause = { togglePlayback(controller) },
                     onOpen = { expanded = true },
+                    onNext = { controller?.seekToNextMediaItem() },
+                    onPrevious = { controller?.seekToPreviousMediaItem() },
                 )
                 }
             }
@@ -511,6 +514,7 @@ private fun SpokifyApp(
                         onMove = { entry, up -> scope.launch { playlists.moveEntry(entry.playlistId, entry.entryId, if (up) entry.position - 1 else entry.position + 1) } },
                         onDownloadAll = { tracks -> offline.enqueueAll(tracks) },
                         onPlayAll = { if (playlistEntries.isNotEmpty()) playList(controller, playlistEntries.map { it.track }, 0, playlistRows.firstOrNull { it.id == selectedPlaylist }?.name ?: "Playlist") },
+                        onShuffle = { if (playlistEntries.isNotEmpty()) { controller?.shuffleModeEnabled = true; playList(controller, playlistEntries.map { it.track }, playlistEntries.indices.random(), playlistRows.firstOrNull { it.id == selectedPlaylist }?.name ?: "Playlist") } },
                         onRename = { renameName = playlistRows.firstOrNull { it.id == selectedPlaylist }?.name.orEmpty(); dialog = "rename" },
                         onDelete = { dialog = "delete" },
                     )
@@ -523,6 +527,9 @@ private fun SpokifyApp(
                         onPlay = { selectSong(favorites, it) },
                         onFavorite = ::saveSong,
                         onDownload = { offline.enqueue(it) },
+                        onPlayAll = { if (favorites.isNotEmpty()) { controller?.shuffleModeEnabled = false; playList(controller, favorites, 0, "Liked Songs") } },
+                        onShuffle = { if (favorites.isNotEmpty()) { controller?.shuffleModeEnabled = true; playList(controller, favorites, favorites.indices.random(), "Liked Songs") } },
+                        onDownloadAll = { offline.enqueueAll(favorites) },
                     )
 
                     "history" -> CollectionScreen(
@@ -533,6 +540,8 @@ private fun SpokifyApp(
                         onPlay = { selectSong(listOf(it), it) },
                         onFavorite = ::saveSong,
                         onDownload = { offline.enqueue(it) },
+                        onPlayAll = { if (history.isNotEmpty()) { controller?.shuffleModeEnabled = false; playList(controller, history, 0, "Recently Played") } },
+                        onShuffle = { if (history.isNotEmpty()) { controller?.shuffleModeEnabled = true; playList(controller, history, history.indices.random(), "Recently Played") } },
                     )
 
                     "downloads" -> {
@@ -603,6 +612,8 @@ private fun SpokifyApp(
                             onOpenOnRepeat = { section = "on-repeat" },
                             playlists = playlistCards,
                             onOpenPlaylist = { card -> selectedPlaylist = card.id; section = "playlist" },
+                            activeGroupName = currentQueueTitle,
+                            activeTrackUid = playerSnapshot.current?.uid,
                         )
 
                         SpokifyTab.SEARCH -> SearchScreen(
@@ -639,6 +650,7 @@ private fun SpokifyApp(
                             onCreatePlaylist = { playlistName = ""; dialog = "create" },
                             onRepeatCount = onRepeat.size,
                             onOpenOnRepeat = { section = "on-repeat" },
+                            activeGroupName = currentQueueTitle,
                         )
                     }
                 }

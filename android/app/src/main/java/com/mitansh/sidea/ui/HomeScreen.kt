@@ -1,21 +1,20 @@
 package com.mitansh.sidea.ui
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,35 +39,90 @@ fun HomeScreen(
     modifier: Modifier = Modifier, onOpenProfile: () -> Unit = {},
     onRepeatCount: Int = 0, onOpenOnRepeat: () -> Unit = {},
     playlists: List<PlaylistCard> = emptyList(), onOpenPlaylist: (PlaylistCard) -> Unit = {},
+    activeGroupName: String? = null,
+    activeTrackUid: String? = null,
 ) {
     val favoriteUids = remember(favorites) { favorites.mapTo(hashSetOf()) { it.uid } }
     LazyColumn(modifier.fillMaxSize().background(SpokifyInk), contentPadding = PaddingValues(bottom = 16.dp + LocalBottomContentPadding.current)) {
         stickyHeader(key = "filters", contentType = "filters") {
-            Row(Modifier.fillMaxWidth().background(SpokifyInk).horizontalScroll(rememberScrollState()).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(SpokifyInk).horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 ProfileButton(onOpenProfile)
                 HomePill("All", true) {}
-                HomePill("Liked Songs", false, onOpenFavorites)
-                HomePill("Downloaded", false, onOpenDownloads)
+                HomePill("Music", false, onOpenFavorites)
+                HomePill("Podcasts", false, onOpenDownloads)
             }
         }
         item(key = "shortcuts", contentType = "shortcuts") {
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.weight(1f).heightIn(min = 58.dp).clip(RoundedCornerShape(4.dp)).background(SpokifyElevated).motionClickable(onClick = onOpenOnRepeat), verticalAlignment = Alignment.CenterVertically) {
-                        OnRepeatArtwork(Modifier.size(56.dp), compact = true)
-                        Text("On Repeat", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 9.dp))
+                    Row(
+                        Modifier
+                            .weight(1f)
+                            .height(56.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF2A2A2A))
+                            .motionClickable(onClick = onOpenOnRepeat),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OnRepeatArtwork(
+                            Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)),
+                            compact = true,
+                        )
+                        Text(
+                            "On Repeat",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                        if (activeGroupName == "On Repeat") {
+                            NowPlayingEqualizerBars(
+                                isPlaying = true,
+                                modifier = Modifier
+                                    .padding(end = 10.dp)
+                                    .size(width = 14.dp, height = 14.dp),
+                            )
+                        }
                     }
-                    Shortcut("Liked Songs", Modifier.weight(1f), R.drawable.ic_favorite, onClick = onOpenFavorites)
+                    Shortcut(
+                        "Liked Songs",
+                        Modifier.weight(1f),
+                        icon = R.drawable.ic_favorite,
+                        isPlaying = activeGroupName == "Liked Songs",
+                        onClick = onOpenFavorites,
+                    )
                 }
                 playlists.take(4).chunked(2).forEach { pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pair.forEach { playlist -> Shortcut(playlist.name, Modifier.weight(1f), artwork = playlist.artworkUrl, onClick = { onOpenPlaylist(playlist) }) }
+                        pair.forEach { playlist ->
+                            Shortcut(
+                                playlist.name,
+                                Modifier.weight(1f),
+                                artwork = playlist.artworkUrl,
+                                isPlaying = activeGroupName == playlist.name,
+                                onClick = { onOpenPlaylist(playlist) },
+                            )
+                        }
                         if (pair.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
                 recentlyPlayed.take(if (playlists.isEmpty()) 4 else 2).chunked(2).forEach { pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pair.forEach { track -> Shortcut(track.title, Modifier.weight(1f), artwork = track.artworkUrl, onClick = { onPlay(track) }) }
+                        pair.forEach { track ->
+                            Shortcut(
+                                track.title,
+                                Modifier.weight(1f),
+                                artwork = track.artworkUrl,
+                                isPlaying = activeTrackUid == track.uid,
+                                onClick = { onPlay(track) },
+                            )
+                        }
                         if (pair.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
@@ -92,8 +146,8 @@ fun HomeScreen(
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(recentlyPlayed.take(8), key = { it.uid }, contentType = { "album" }) { track ->
                         Column(Modifier.width(160.dp).motionClickable { onPlay(track) }) {
-                            Artwork(track.artworkUrl, "${track.title} artwork", Modifier.size(160.dp).clip(RoundedCornerShape(5.dp)), sizePx = 640)
-                            Text(track.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 9.dp))
+                            Artwork(track.artworkUrl, "${track.title} artwork", Modifier.size(160.dp).clip(RoundedCornerShape(6.dp)), sizePx = 640)
+                            Text(track.title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 9.dp))
                             Text(track.artist, color = SpokifyMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
@@ -119,24 +173,80 @@ fun HomeScreen(
 @Composable
 fun HomePill(title: String, selected: Boolean = false, onClick: () -> Unit) {
     val foreground by animateColorAsState(if (selected) Color.Black else Color.White, motionTween(160), label = "filter text")
-    val background by animateColorAsState(if (selected) SpokifyGreen else Color.White.copy(alpha = .09f), motionTween(160), label = "filter fill")
-    Text(title, color = foreground, fontSize = 13.sp, maxLines = 1,
-        modifier = Modifier.clip(CircleShape).background(background).motionClickable(onClick = onClick).padding(horizontal = 15.dp, vertical = 10.dp))
+    val background by animateColorAsState(if (selected) SpokifyGreen else Color(0xFF282828), motionTween(160), label = "filter fill")
+    Text(
+        title,
+        color = foreground,
+        fontSize = 13.sp,
+        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(background)
+            .motionClickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+    )
 }
 
 @Composable
 fun SectionTitle(title: String) {
-    Text(title, color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 26.dp, bottom = 16.dp))
+    Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 26.dp, bottom = 16.dp))
 }
 
 @Composable
-private fun Shortcut(title: String, modifier: Modifier, icon: Int? = null, artwork: String? = null, onClick: () -> Unit) {
-    Row(modifier.heightIn(min = 58.dp).clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = .09f)).motionClickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
+private fun Shortcut(
+    title: String,
+    modifier: Modifier,
+    icon: Int? = null,
+    artwork: String? = null,
+    isPlaying: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier
+            .height(56.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0xFF2A2A2A))
+            .motionClickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         if (icon != null) {
-            Box(Modifier.size(56.dp).background(Brush.linearGradient(if (icon == R.drawable.ic_favorite) listOf(Color(0xFF4824B8), Color(0xFFAFD9CF)) else listOf(Color(0xFF16634F), Color(0xFF213B31)))), contentAlignment = Alignment.Center) {
-                Icon(painterResource(icon), null, Modifier.size(25.dp), tint = Color.White)
+            Box(
+                Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp))
+                    .background(Brush.linearGradient(if (icon == R.drawable.ic_favorite) listOf(Color(0xFF4824B8), Color(0xFFAFD9CF)) else listOf(Color(0xFF16634F), Color(0xFF213B31)))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(painterResource(icon), null, Modifier.size(24.dp), tint = Color.White)
             }
-        } else Artwork(artwork, null, Modifier.size(56.dp))
-        Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 9.dp, vertical = 8.dp))
+        } else {
+            Artwork(
+                artwork,
+                null,
+                Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)),
+            )
+        }
+        Text(
+            title,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+        if (isPlaying) {
+            NowPlayingEqualizerBars(
+                isPlaying = true,
+                modifier = Modifier
+                    .padding(end = 10.dp)
+                    .size(width = 14.dp, height = 14.dp),
+            )
+        }
     }
 }
