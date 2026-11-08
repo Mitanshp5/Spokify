@@ -5,8 +5,10 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.background
@@ -265,11 +267,20 @@ fun MiniPlayer(
     var dragDistance by remember { mutableFloatStateOf(0f) }
     var cardWidthPx by remember { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
-    val swipeThreshold = with(density) { 48.dp.toPx() }
+    val swipeThreshold = with(density) { 40.dp.toPx() }
+    var lastTrackId by remember { mutableStateOf(trackId) }
 
     LaunchedEffect(trackId) {
-        if (offsetX.value != 0f) {
-            offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+        if (trackId != lastTrackId) {
+            val direction = if (offsetX.value > 0f) 1 else if (offsetX.value < 0f) -1 else 0
+            lastTrackId = trackId
+            if (direction != 0) {
+                val width = if (cardWidthPx > 0f) cardWidthPx else 800f
+                offsetX.snapTo(if (direction > 0) -width else width)
+                offsetX.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow))
+            }
+        } else if (offsetX.value != 0f) {
+            offsetX.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow))
         }
     }
 
@@ -281,41 +292,51 @@ fun MiniPlayer(
             .clip(RoundedCornerShape(8.dp))
             .background(background)
             .onSizeChanged { cardWidthPx = it.width.toFloat() }
-            .draggable(
-                orientation = Orientation.Horizontal,
-                state = rememberDraggableState { delta ->
-                    dragDistance += delta
-                    scope.launch { offsetX.snapTo(dragDistance) }
-                },
-                onDragStarted = {
-                    dragDistance = 0f
-                },
-                onDragStopped = { velocity ->
-                    val threshold = swipeThreshold
-                    val width = if (cardWidthPx > 0f) cardWidthPx else 800f
-                    // Swipe left for previous song, swipe right for next song
-                    if (dragDistance < -threshold || velocity < -400f) {
-                        scope.launch {
-                            offsetX.animateTo(-width, tween(140, easing = FastOutLinearInEasing))
-                            onPrevious()
-                            offsetX.snapTo(width)
-                            offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        dragDistance = 0f
+                    },
+                    onDragEnd = {
+                        val width = if (cardWidthPx > 0f) cardWidthPx else 800f
+                        if (dragDistance > swipeThreshold) {
+                            // Swiped RIGHT -> NEXT SONG (user requirement: exactly like next button)
+                            scope.launch {
+                                offsetX.animateTo(width, tween(150, easing = FastOutLinearInEasing))
+                                onNext()
+                                kotlinx.coroutines.delay(450)
+                                if (offsetX.value != 0f) {
+                                    offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+                                }
+                            }
+                        } else if (dragDistance < -swipeThreshold) {
+                            // Swiped LEFT -> PREVIOUS SONG
+                            scope.launch {
+                                offsetX.animateTo(-width, tween(150, easing = FastOutLinearInEasing))
+                                onPrevious()
+                                kotlinx.coroutines.delay(450)
+                                if (offsetX.value != 0f) {
+                                    offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
+                                }
+                            }
+                        } else {
+                            scope.launch {
+                                offsetX.animateTo(0f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow))
+                            }
                         }
-                    } else if (dragDistance > threshold || velocity > 400f) {
-                        scope.launch {
-                            offsetX.animateTo(width, tween(140, easing = FastOutLinearInEasing))
-                            onNext()
-                            offsetX.snapTo(-width)
-                            offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
-                        }
-                    } else {
-                        scope.launch {
-                            offsetX.animateTo(0f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow))
-                        }
+                        dragDistance = 0f
+                    },
+                    onDragCancel = {
+                        scope.launch { offsetX.animateTo(0f) }
+                        dragDistance = 0f
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        dragDistance += dragAmount
+                        scope.launch { offsetX.snapTo(dragDistance) }
                     }
-                    dragDistance = 0f
-                }
-            )
+                )
+            }
             .motionClickable(onClick = onOpen)
     ) {
         Row(
@@ -344,6 +365,6 @@ fun MiniPlayer(
             SongSaveButton(song ?: Track(trackId, title, artist, artworkUrl = artworkUrl))
             MotionIconButton(onClick = onPlayPause) { PlayPauseIcon(isPlaying, Modifier.size(28.dp)) }
         }
-        LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(2.dp), color = Color.White, trackColor = Color.White.copy(alpha = .2f))
+        LinearProgressIndicator(progress = { progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(2.dp), color = Color.White, trackColor = Color.White.copy(alpha = .2f))
     }
 }

@@ -409,8 +409,8 @@ private fun SpokifyApp(
                 repeatMode = playerSnapshot.repeatMode,
                 onSeek = { controller?.seekTo(it) },
                 onPlayPause = { togglePlayback(controller) },
-                onNext = { controller?.seekToNextMediaItem() },
-                onPrevious = { controller?.seekToPreviousMediaItem() },
+                onNext = { playNextTrack(controller) },
+                onPrevious = { playPreviousTrack(controller) },
                 onToggleFavorite = { saveSong(currentTrack) },
                 onDownload = { offline.enqueue(currentTrack) },
                 onToggleShuffle = { controller?.shuffleModeEnabled = !playerSnapshot.shuffleEnabled },
@@ -455,8 +455,8 @@ private fun SpokifyApp(
                     },
                     onPlayPause = { togglePlayback(controller) },
                     onOpen = { expanded = true },
-                    onNext = { controller?.seekToNextMediaItem() },
-                    onPrevious = { controller?.seekToPreviousMediaItem() },
+                    onNext = { playNextTrack(controller) },
+                    onPrevious = { playPreviousTrack(controller, forcePreviousTrack = true) },
                 )
                 }
             }
@@ -753,6 +753,46 @@ private fun togglePlayback(player: MediaController?) {
     player ?: return
     if (player.playerError != null) { player.prepare(); player.play() }
     else if (player.playWhenReady) player.pause() else player.play()
+}
+
+private fun playNextTrack(controller: MediaController?) {
+    controller ?: return
+    val count = controller.mediaItemCount
+    if (count <= 0) return
+    val current = controller.currentMediaItemIndex
+    if (controller.repeatMode == Player.REPEAT_MODE_ONE) {
+        val nextIndex = (current + 1) % count
+        controller.seekToDefaultPosition(nextIndex)
+        controller.play()
+    } else if (controller.hasNextMediaItem()) {
+        controller.seekToNextMediaItem()
+        controller.play()
+    } else if (count > 1) {
+        controller.seekToDefaultPosition(0)
+        controller.play()
+    }
+}
+
+private fun playPreviousTrack(controller: MediaController?, forcePreviousTrack: Boolean = false) {
+    controller ?: return
+    val count = controller.mediaItemCount
+    if (count <= 0) return
+    val current = controller.currentMediaItemIndex
+    if (!forcePreviousTrack && controller.currentPosition > 3000L) {
+        controller.seekTo(0L)
+    } else if (controller.repeatMode == Player.REPEAT_MODE_ONE) {
+        val prevIndex = if (current - 1 >= 0) current - 1 else count - 1
+        controller.seekToDefaultPosition(prevIndex)
+        controller.play()
+    } else if (controller.hasPreviousMediaItem()) {
+        controller.seekToPreviousMediaItem()
+        controller.play()
+    } else if (count > 1) {
+        controller.seekToDefaultPosition(count - 1)
+        controller.play()
+    } else {
+        controller.seekTo(0L)
+    }
 }
 
 private fun MediaController?.toUiSnapshot(): PlayerUiSnapshot {

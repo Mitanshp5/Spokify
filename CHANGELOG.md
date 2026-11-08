@@ -1,3 +1,10 @@
+# Spokify 0.3.2
+
+- Refine Mini Player swipe gestures: swiping right reliably advances to the next track in the queue (handling Repeat-One and end-of-queue wrapping without repeating the same song).
+- Swiping left on the Mini Player navigates to the previous track directly without resetting to 0:00.
+- Clean pointer input handling so tapping anywhere on the Mini Player opens the full player without gesture conflicts.
+- Edge-to-edge flush progress indicator on Mini Player matching official Spotify.
+
 # Spokify 0.3.1
 
 - Fix homepage shortcuts grid layout: combine playlists and recent songs into full 2-column pairs to eliminate missing/blank shortcut tiles.
