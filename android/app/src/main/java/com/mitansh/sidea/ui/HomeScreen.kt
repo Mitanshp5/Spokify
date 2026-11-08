@@ -56,7 +56,7 @@ fun HomeScreen(
                 ProfileButton(onOpenProfile)
                 HomePill("All", true) {}
                 HomePill("Music", false, onOpenFavorites)
-                HomePill("Podcasts", false, onOpenDownloads)
+                HomePill("Downloads", false, onOpenDownloads)
             }
         }
         item(key = "shortcuts", contentType = "shortcuts") {
