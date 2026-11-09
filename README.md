@@ -25,7 +25,7 @@ app restarts; **Check for updates** on the update screen works at any time.
 
 Requires JDK 21, Android SDK platform 37, and an Android SDK path supplied through
 `ANDROID_HOME` or the untracked `android/local.properties`. The extractor is
-vendored in `android/third_party/LevyraExtractor` with its notices and license.
+vendored in `android/third_party/extractor` with its notices and license.
 
 ```sh
 cd android

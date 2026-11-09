@@ -21,5 +21,5 @@ rootProject.name = "SideA"
 include(":app")
 
 // Vendored NewPipe-derived extractor, reused as a source build.
-// Group/name/version come from third_party/LevyraExtractor/build.gradle defaults.
-includeBuild("third_party/LevyraExtractor")
+// Group/name/version come from third_party/extractor/build.gradle defaults.
+includeBuild("third_party/extractor")

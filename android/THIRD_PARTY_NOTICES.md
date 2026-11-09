@@ -11,7 +11,7 @@ or license. The GPL license text is provided in LICENSE.
 
 ## Vendored extractor
 
-The source dependency in third_party/LevyraExtractor retains its original
+The source dependency in third_party/extractor retains its original
 identity, copyright headers, LICENSE and THIRD_PARTY_NOTICES.md. Consult
 those files for the extractor's upstream lineage and dependency notices.
 

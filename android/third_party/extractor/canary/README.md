@@ -97,8 +97,8 @@ From repository root:
 
 ```bash
 python scripts/youtube_canary.py probe \
-  --config third_party/LevyraExtractor/canary/config.json \
-  --baseline third_party/LevyraExtractor/canary/baseline.json \
+  --config third_party/extractor/canary/config.json \
+  --baseline third_party/extractor/canary/baseline.json \
   --out-dir artifacts/youtube-canary
 ```
 

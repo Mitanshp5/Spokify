@@ -27,14 +27,14 @@ Before editing, read and follow:
 
 Find the smallest root-cause fix that restores compatibility with the newly observed YouTube player/protocol behavior while preserving Levyra's currently working playback architecture.
 
-Prefer fixing the actual extraction engine under `third_party/LevyraExtractor/extractor/src/...`. Only use the Android resolver/decoder compatibility layer when the extractor cannot safely express the required behavior.
+Prefer fixing the actual extraction engine under `third_party/extractor/extractor/src/...`. Only use the Android resolver/decoder compatibility layer when the extractor cannot safely express the required behavior.
 
 ## Allowed production scope
 
 You may edit only these production areas:
 
-- `third_party/LevyraExtractor/extractor/src/main/**`
-- `third_party/LevyraExtractor/extractor/src/test/**`
+- `third_party/extractor/extractor/src/main/**`
+- `third_party/extractor/extractor/src/test/**`
 - `app/src/main/java/com/luc4n3x/levyra/data/PlaybackResolver.kt`
 - `app/src/main/java/com/luc4n3x/levyra/data/YoutubeLocalDecoder.kt`
 - `app/src/main/java/com/luc4n3x/levyra/data/network/YoutubeClientIdentityInterceptor.kt`
@@ -43,7 +43,7 @@ You may edit only these production areas:
 Do **not** edit:
 
 - GitHub Actions or canary automation files
-- `third_party/LevyraExtractor/canary/**`
+- `third_party/extractor/canary/**`
 - UI, player controls, Canvas, localization, versions, dependencies, signing, release/F-Droid configuration, downloads, database/schema, or unrelated code
 - `YoutubePlaybackSecurity.kt` or account/PoToken/session security unless the evidence proves the current security contract itself is the root cause; if that is required, make no production change and leave a clear diagnostic explanation instead
 
