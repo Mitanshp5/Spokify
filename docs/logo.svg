@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="128" height="128" role="img" aria-label="Spokify logo">
+  <rect x="2" y="2" width="104" height="104" rx="24" fill="#121212" stroke="#2A2A2A" stroke-width="1.5" />
+  <g transform="translate(54 54) scale(0.76) translate(-54 -54)">
+    <circle cx="54" cy="54" r="50" fill="#1ED760" />
+    <path d="M26,31C50,21 61,49 86,50" fill="none" stroke="#121212" stroke-width="10" stroke-linecap="round" />
+    <path d="M24,49C46,41 58,66 81,67" fill="none" stroke="#121212" stroke-width="9" stroke-linecap="round" />
+    <path d="M22,66C43,59 54,82 76,83" fill="none" stroke="#121212" stroke-width="8.5" stroke-linecap="round" />
+  </g>
+</svg>

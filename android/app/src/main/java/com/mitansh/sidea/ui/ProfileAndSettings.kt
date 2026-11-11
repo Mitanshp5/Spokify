@@ -55,13 +55,35 @@ private fun ProfileAvatar(name: String, photo: java.io.File?, modifier: Modifier
     }
 }
 
+private val UpdateDotColor = Color(0xFFFFD54F)
+private val DrawerSurfaceColor = Color(0xFF1F1F1F)
+
+@Composable
+private fun UpdateDot(borderColor: Color, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(10.dp)
+            .background(UpdateDotColor, CircleShape)
+            .border(1.5.dp, borderColor, CircleShape),
+    )
+}
+
+@Composable
+private fun BadgedDrawerIcon(icon: Int, showUpdateDot: Boolean, borderColor: Color) {
+    Box(Modifier.size(28.dp)) {
+        Icon(painterResource(icon), null, Modifier.matchParentSize(), tint = Color.White)
+        if (showUpdateDot) {
+            UpdateDot(borderColor = borderColor, modifier = Modifier.align(Alignment.TopEnd))
+        }
+    }
+}
+
 @Composable
 fun ProfileButton(onClick: () -> Unit, modifier: Modifier = Modifier.size(34.dp)) {
     val available = LocalAvailableUpdate.current?.collectAsStateWithLifecycle()?.value == true
     Box(modifier.semantics { contentDescription = if (available) "Open profile, update available" else "Open profile" }.motionClickable(onClick = onClick)) {
         ProfileAvatar(LocalProfileName.current, LocalProfilePhoto.current, Modifier.matchParentSize())
-        if (available) Box(Modifier.align(Alignment.TopEnd).size(10.dp)
-            .background(Color(0xFFFFD54F), CircleShape).border(1.5.dp, SpokifyInk, CircleShape))
+        if (available) UpdateDot(borderColor = SpokifyInk, modifier = Modifier.align(Alignment.TopEnd))
     }
 }
 
@@ -104,12 +126,12 @@ fun ProfileNavigation(drawerState: DrawerState, onRecents: () -> Unit, onCapsule
     fun navigate(action: () -> Unit) { scope.launch { drawerState.close(); action() } }
     CompositionLocalProvider(LocalProfileName provides name, LocalProfilePhoto provides photos.file(photo), LocalAvailableUpdate provides updates.available) {
         ModalNavigationDrawer(drawerState = drawerState, drawerContent = {
-            ModalDrawerSheet(drawerContainerColor = Color(0xFF1F1F1F), drawerShape = RectangleShape, modifier = Modifier.fillMaxWidth(.9f)) {
+            ModalDrawerSheet(drawerContainerColor = DrawerSurfaceColor, drawerShape = RectangleShape, modifier = Modifier.fillMaxWidth(.9f)) {
                 Column(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
                     Surface(color = Color(0xFF2A2A2A), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp)
                         .motionClickable { editProfile() }) {
                         Row(Modifier.heightIn(min = 88.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            ProfileButton({ editProfile() }, Modifier.size(54.dp))
+                            ProfileAvatar(name, photos.file(photo), Modifier.size(54.dp))
                             Column(Modifier.weight(1f).padding(start = 14.dp)) {
                                 Text(name, color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.Bold)
                                 Text("Edit local profile", color = SpokifyMuted, modifier = Modifier.padding(top = 4.dp))
@@ -166,23 +188,28 @@ fun ProfileNavigation(drawerState: DrawerState, onRecents: () -> Unit, onCapsule
 @Composable
 private fun UpdateDrawerDestination(updates: AppUpdateViewModel, onClick: () -> Unit) {
     val available by updates.available.collectAsStateWithLifecycle()
-    DrawerDestination(if (available) "Update Spokify" else "App updates", R.drawable.ic_download, onClick)
+    DrawerDestination(
+        title = if (available) "Update Spokify" else "App updates",
+        icon = R.drawable.ic_download,
+        showUpdateDot = available,
+        onClick = onClick,
+    )
 }
 
 @Composable
-private fun DrawerDestination(title: String, icon: Int, onClick: () -> Unit) {
+private fun DrawerDestination(title: String, icon: Int, showUpdateDot: Boolean = false, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).motionClickable(onClick = onClick)
         .padding(horizontal = 8.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(painterResource(icon), null, Modifier.size(28.dp), tint = Color.White)
+        BadgedDrawerIcon(icon = icon, showUpdateDot = showUpdateDot, borderColor = DrawerSurfaceColor)
         Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 16.dp))
     }
 }
 
 @Composable
-fun SettingsRow(title: String, subtitle: String, icon: Int, onClick: () -> Unit) {
+fun SettingsRow(title: String, subtitle: String, icon: Int, showUpdateDot: Boolean = false, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().motionClickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(painterResource(icon), null, Modifier.size(28.dp), tint = Color.White)
+        BadgedDrawerIcon(icon = icon, showUpdateDot = showUpdateDot, borderColor = SpokifyInk)
         Column(Modifier.weight(1f).padding(start = 20.dp)) {
             Text(title, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
             Text(subtitle, color = SpokifyMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
@@ -195,6 +222,7 @@ fun SettingsScreen(onBack: () -> Unit, onPlayback: () -> Unit, onDownloads: () -
     onImport: () -> Unit, onUpdates: () -> Unit, historyCount: Int, onClearHistory: () -> Unit,
     playerVisible: Boolean = false) {
     val context = LocalContext.current
+    val updateAvailable = LocalAvailableUpdate.current?.collectAsStateWithLifecycle()?.value == true
     var filter by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     var clear by remember { mutableStateOf(false) }
@@ -223,14 +251,14 @@ fun SettingsScreen(onBack: () -> Unit, onPlayback: () -> Unit, onDownloads: () -
                     }
                 }
             }
-            if ("Playback Autoplay Quiet notifications".contains(filter, true)) item { SettingsRow("Playback", "Autoplay · Quiet notifications", R.drawable.ic_play, onPlayback) }
+            if ("Playback Autoplay Quiet notifications".contains(filter, true)) item { SettingsRow("Playback", "Autoplay · Quiet notifications", R.drawable.ic_play, onClick = onPlayback) }
             if ("Notifications".contains(filter, true)) item { SettingsRow("Notifications", "Playback controls and notification permissions", R.drawable.ic_bell) {
                 context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             } }
-            if ("Apps Import playlist".contains(filter, true)) item { SettingsRow("Import from other apps", "Public Spotify and YouTube playlist links", R.drawable.ic_add, onImport) }
-            if ("Data-saving offline downloads storage media quality".contains(filter, true)) item { SettingsRow("Data-saving and offline", "Downloads · Storage · Network preferences", R.drawable.ic_download, onDownloads) }
+            if ("Apps Import playlist".contains(filter, true)) item { SettingsRow("Import from other apps", "Public Spotify and YouTube playlist links", R.drawable.ic_add, onClick = onImport) }
+            if ("Data-saving offline downloads storage media quality".contains(filter, true)) item { SettingsRow("Data-saving and offline", "Downloads · Storage · Network preferences", R.drawable.ic_download, onClick = onDownloads) }
             if ("Privacy search history".contains(filter, true)) item { SettingsRow("Search history", "$historyCount recent searches · Clear history", R.drawable.ic_history) { clear = true } }
-            if ("App updates version download install".contains(filter, true)) item { SettingsRow("App updates", "Check for updates · Version ${BuildConfig.VERSION_NAME}", R.drawable.ic_download, onUpdates) }
+            if ("App updates version download install".contains(filter, true)) item { SettingsRow("App updates", if (updateAvailable) "Update available · Version ${BuildConfig.VERSION_NAME}" else "Check for updates · Version ${BuildConfig.VERSION_NAME}", R.drawable.ic_download, showUpdateDot = updateAvailable, onClick = onUpdates) }
             if ("About support version".contains(filter, true)) item { SettingsRow("About Spokify", "Version ${BuildConfig.VERSION_NAME}", R.drawable.ic_info) { about = true } }
         }
     }
