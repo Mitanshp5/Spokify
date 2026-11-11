@@ -1,3 +1,8 @@
+# Spokify 0.3.4
+
+- Disable R8 identifier obfuscation (`-dontobfuscate`) in optimized builds while retaining code and resource shrinking so static analyzers can inspect readable Kotlin class and method names.
+- Rename vendored `third_party/LevyraExtractor` directory to `third_party/extractor` and update Gradle composite build and notice references.
+
 # Spokify 0.3.3
 
 - Rename top filter pill on Home screen from "Podcasts" to "Downloads" to directly reflect its navigation to the Offline Backup screen.
